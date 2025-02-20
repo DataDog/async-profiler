@@ -259,6 +259,16 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         }
     }
 
+    if (!VMStructs::goodPtr((const void*)fp)) {
+        JavaFrameAnchor* thrd_anchor = vm_thread != NULL ? vm_thread->anchor() : NULL;
+        // top fp is somehow corrupted; let's try to recover from the last known Java frame
+        if (thrd_anchor != NULL && thrd_anchor->lastJavaSP() != 0) {
+            sp = thrd_anchor->lastJavaSP();
+            fp = thrd_anchor->lastJavaFP();
+            pc = thrd_anchor->lastJavaPC();
+        }
+    }
+
     // Walk until the bottom of the stack or until the first Java frame
     while (depth < max_depth) {
         if (CodeHeap::contains(pc)) {

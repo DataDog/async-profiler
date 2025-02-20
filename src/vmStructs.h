@@ -131,10 +131,6 @@ class VMStructs {
         return (const char*)this + offset;
     }
 
-    static bool goodPtr(const void* ptr) {
-        return (uintptr_t)ptr >= 0x1000 && ((uintptr_t)ptr & (sizeof(uintptr_t) - 1)) == 0;
-    }
-
     template<typename T>
     static T align(const void* ptr) {
         return (T)((uintptr_t)ptr & ~(sizeof(T) - 1));
@@ -178,6 +174,10 @@ class VMStructs {
 
     static bool isInterpretedFrameValidFunc(const void* pc) {
         return pc >= _interpreted_frame_valid_start && pc < _interpreted_frame_valid_end;
+    }
+
+    static bool goodPtr(const void* ptr) {
+        return (uintptr_t)ptr >= 0x1000 && ((uintptr_t)ptr & (sizeof(uintptr_t) - 1)) == 0;
     }
 };
 
