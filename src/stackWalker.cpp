@@ -265,6 +265,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
                 fillFrame(frames[depth++], BCI_ERROR, "unknown_nmethod");
+                // we are somewhere in JVM code heap and have no idea what is this frame
+                // might be good to bail out since it would be a challenge to unwind properly?
+                break;
             } else if (nm->isNMethod()) {
                 int level = nm->level();
                 FrameTypeId type = detail != VM_BASIC && level >= 1 && level <= 3 ? FRAME_C1_COMPILED : FRAME_JIT_COMPILED;
@@ -384,7 +387,12 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 }
             }
         } else {
-            fillFrame(frames[depth++], BCI_NATIVE_FRAME, profiler->findNativeMethod(pc));
+            const char* frame_name = profiler->findNativeMethod(pc);
+            fillFrame(frames[depth++], BCI_NATIVE_FRAME, frame_name);
+            // _start should be the process entry point; any attempt to unwind from there will fail
+            if (frame_name && !strcmp("_start", frame_name)) {
+                break;
+            }
         }
 
         uintptr_t prev_sp = sp;
@@ -394,6 +402,10 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         }
 
         CodeCache* cc = profiler->findLibraryByAddress(pc);
+        // It may happen that the current PC can not be resolved as belonging to any known library.
+        // In that case we just use the default_frame which is a bit of gamble on aarch64 due to
+        // no standard in the function epilogue - but the bet is that the GCC compiled code is
+        // seen more often than the clang one.
         FrameDesc* f = cc != NULL ? cc->findFrameDesc(pc) : &FrameDesc::default_frame;
 
         u8 cfa_reg = (u8)f->cfa;
