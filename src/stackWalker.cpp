@@ -248,6 +248,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Should be preserved across setjmp/longjmp
     volatile int depth = 0;
 
+    JavaFrameAnchor* anchor = NULL;
+    bool recovered_from_anchor = false;
+
     if (vm_thread != NULL) {
         vm_thread->exception() = &crash_protection_ctx;
         if (setjmp(crash_protection_ctx) != 0) {
@@ -257,6 +260,7 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             }
             return depth;
         }
+        anchor = vm_thread->anchor();
     }
 
     // Walk until the bottom of the stack or until the first Java frame
@@ -265,8 +269,6 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
                 fillFrame(frames[depth++], BCI_ERROR, "unknown_nmethod");
-                // we are somewhere in JVM code heap and have no idea what is this frame
-                // might be good to bail out since it would be a challenge to unwind properly?
                 break;
             } else if (nm->isNMethod()) {
                 int level = nm->level();
@@ -291,9 +293,15 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     // Handle situations when sp is temporarily changed in the compiled code
                     frame.adjustSP(nm->entry(), pc, sp);
 
+                    uintptr_t fpback = fp;
                     sp += nm->frameSize() * sizeof(void*);
                     fp = ((uintptr_t*)sp)[-FRAME_PC_SLOT - 1];
                     pc = ((const void**)sp)[-FRAME_PC_SLOT];
+
+                    if (!CodeHeap::contains(pc) && profiler->findLibraryByAddress(pc) == NULL) {
+                        fp = *(uintptr_t *)fpback;
+                        pc = *(const void **)(fpback + sizeof(void*));
+                    }
                     continue;
                 } else if (frame.unwindCompiled(nm, (uintptr_t&)pc, sp, fp) && profiler->isAddressInCode(pc)) {
                     continue;
@@ -345,6 +353,18 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     }
                 }
 
+                if (!recovered_from_anchor && anchor && detail < VM_EXPERT) {
+                    if (anchor->lastJavaPC() == nullptr || anchor->lastJavaSP() == 0) {
+                       // End of Java stack
+                        break;
+                    }
+                    fp = anchor->lastJavaFP();
+                    sp = anchor->lastJavaSP();
+                    pc = anchor->lastJavaPC();
+                    recovered_from_anchor = true;
+                    continue;
+                }
+
                 fillFrame(frames[depth++], BCI_ERROR, "break_interpreted");
                 break;
             } else if (detail < VM_EXPERT && nm->isEntryFrame(pc)) {
@@ -387,12 +407,12 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 }
             }
         } else {
-            const char* frame_name = profiler->findNativeMethod(pc);
-            fillFrame(frames[depth++], BCI_NATIVE_FRAME, frame_name);
+            const char* name = profiler->findNativeMethod(pc);
             // _start should be the process entry point; any attempt to unwind from there will fail
-            if (frame_name && !strcmp("_start", frame_name)) {
+            if (name && !strcmp("_start", name)) {
                 break;
             }
+            fillFrame(frames[depth++], BCI_NATIVE_FRAME, name);
         }
 
         uintptr_t prev_sp = sp;
@@ -402,10 +422,6 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         }
 
         CodeCache* cc = profiler->findLibraryByAddress(pc);
-        // It may happen that the current PC can not be resolved as belonging to any known library.
-        // In that case we just use the default_frame which is a bit of gamble on aarch64 due to
-        // no standard in the function epilogue - but the bet is that the GCC compiled code is
-        // seen more often than the clang one.
         FrameDesc* f = cc != NULL ? cc->findFrameDesc(pc) : &FrameDesc::default_frame;
 
         u8 cfa_reg = (u8)f->cfa;
@@ -448,6 +464,15 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             } else {
                 // Stack bottom
                 break;
+            }
+        }
+
+        if (anchor && !recovered_from_anchor && !VMStructs::goodPtr((const void*)fp)) {
+            if (anchor->lastJavaPC() != nullptr && anchor->lastJavaSP() != 0) {
+                recovered_from_anchor = true;
+                sp = anchor->lastJavaSP();
+                fp = anchor->lastJavaFP();
+                pc = anchor->lastJavaPC();
             }
         }
 
