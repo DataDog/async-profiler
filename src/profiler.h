@@ -218,7 +218,7 @@ class Profiler {
     CodeCache* findLibraryByAddress(const void* address);
     const char* findNativeMethod(const void* address);
     CodeBlob* findRuntimeStub(const void* address);
-    bool isAddressInCode(const void* pc);
+    bool isAddressInCode(const void* pc, bool include_stubs = false);
 
     void trapHandler(int signo, siginfo_t* siginfo, void* ucontext);
     static void segvHandler(int signo, siginfo_t* siginfo, void* ucontext);

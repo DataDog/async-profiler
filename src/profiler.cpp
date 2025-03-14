@@ -307,9 +307,9 @@ CodeBlob* Profiler::findRuntimeStub(const void* address) {
     return _runtime_stubs.findBlobByAddress(address);
 }
 
-bool Profiler::isAddressInCode(const void* pc) {
+bool Profiler::isAddressInCode(const void* pc, bool include_stubs) {
     if (CodeHeap::contains(pc)) {
-        return CodeHeap::findNMethod(pc) != NULL && !(pc >= _call_stub_begin && pc < _call_stub_end);
+        return CodeHeap::findNMethod(pc) != NULL && (include_stubs || !(pc >= _call_stub_begin && pc < _call_stub_end));
     } else {
         return findLibraryByAddress(pc) != NULL;
     }
