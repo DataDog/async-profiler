@@ -269,6 +269,8 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
                 fillFrame(frames[depth++], BCI_ERROR, "unknown_nmethod");
+                // we are somewhere in JVM code heap and have no idea what is this frame
+                // might be good to bail out since it would be a challenge to unwind properly?
                 break;
             } else if (nm->isNMethod()) {
                 int level = nm->level();
@@ -298,9 +300,27 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     fp = ((uintptr_t*)sp)[-FRAME_PC_SLOT - 1];
                     pc = ((const void**)sp)[-FRAME_PC_SLOT];
 
-                    if (!CodeHeap::contains(pc) && profiler->findLibraryByAddress(pc) == NULL) {
-                        fp = *(uintptr_t *)fpback;
-                        pc = *(const void **)(fpback + sizeof(void*));
+                    if (!profiler->isAddressInCode(pc)) {
+                        if (anchor && !recovered_from_anchor) {
+                            recovered_from_anchor = true;
+                            if (anchor->lastJavaPC() == nullptr || anchor->lastJavaSP() == 0) {
+                                // End of Java stack
+                                break;
+                            }
+                            pc = anchor->lastJavaPC();
+                            sp = anchor->lastJavaSP();
+                            fp = anchor->lastJavaFP();
+                            continue;
+                        }
+                        const void* newpc = stripPointer(*(const void **)(fpback + sizeof(void*)));
+                        if (profiler->isAddressInCode(newpc)) {
+                            fp = *(uintptr_t *)fpback;
+                            pc = newpc;
+                            sp = fp;
+                        } else {
+                            fillFrame(frames[depth++], BCI_ERROR, "break_compiled");
+                            break;
+                        }
                     }
                     continue;
                 } else if (frame.unwindCompiled(nm, (uintptr_t&)pc, sp, fp) && profiler->isAddressInCode(pc)) {
@@ -404,6 +424,11 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     fp = ((uintptr_t*)sp)[-FRAME_PC_SLOT - 1];
                     pc = ((const void**)sp)[-FRAME_PC_SLOT];
                     continue;
+                } else {
+                    pc = stripPointer(*(const void **)(fp +sizeof(void*)));
+                    fp = *(uintptr_t *)fp;
+                    sp = fp;
+                    continue;
                 }
             }
         } else {
@@ -413,6 +438,10 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 break;
             }
             fillFrame(frames[depth++], BCI_NATIVE_FRAME, name);
+            // _start should be the process entry point; any attempt to unwind from there will fail
+            if (name && !strcmp("_start", name)) {
+              break;
+            }
         }
 
         uintptr_t prev_sp = sp;
