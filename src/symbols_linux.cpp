@@ -476,8 +476,8 @@ void ElfParser::parseDwarfInfo() {
             CodeBlob* blob = _cc->blob(b);
             if (blob) {
                 instruction_t* ptr = (instruction_t*)blob->_start;
-                instruction_t gcc_pattern = 0xfd030091;   // mov x29, sp
-                instruction_t clang_pattern = 0xa9017bfd; // stp x29, x30, [sp, #16]
+                instruction_t gcc_pattern = 0x910003fd;   // mov x29, sp
+                instruction_t clang_pattern = 0xfd7b01a9; // stp x29, x30, [sp, #16]
                 if (*(ptr + 1) == gcc_pattern || *(ptr + 2) == gcc_pattern) {
                   *table = FrameDesc::default_frame;
                   frame_layout_resolved = true;
