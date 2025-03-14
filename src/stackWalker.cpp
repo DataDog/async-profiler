@@ -300,7 +300,7 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     fp = ((uintptr_t*)sp)[-FRAME_PC_SLOT - 1];
                     pc = ((const void**)sp)[-FRAME_PC_SLOT];
 
-                    if (!profiler->isAddressInCode(pc)) {
+                    if (!CodeHeap::contains(pc) && profiler->findLibraryByAddress(pc) == nullptr) {
                         if (anchor && !recovered_from_anchor) {
                             recovered_from_anchor = true;
                             if (anchor->lastJavaPC() == nullptr || anchor->lastJavaSP() == 0) {
@@ -313,7 +313,7 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                             continue;
                         }
                         const void* newpc = stripPointer(*(const void **)(fpback + sizeof(void*)));
-                        if (profiler->isAddressInCode(newpc)) {
+                        if (CodeHeap::contains(pc) || profiler->findLibraryByAddress(pc)) {
                             fp = *(uintptr_t *)fpback;
                             pc = newpc;
                             sp = fp;
