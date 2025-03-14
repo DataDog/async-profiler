@@ -202,6 +202,11 @@ class CodeCache {
     FrameDesc* findFrameDesc(const void* pc);
 
     size_t usedMemory();
+
+    int count() { return _count; }
+    CodeBlob* blob(int index) {
+      return index >= 0 && index < _count ? &_blobs[index] : nullptr;
+    }
 };
 
 

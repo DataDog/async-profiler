@@ -451,6 +451,10 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         }
 
         CodeCache* cc = profiler->findLibraryByAddress(pc);
+        // It may happen that the current PC can not be resolved as belonging to any known library.
+        // In that case we just use the default_frame which is a bit of gamble on aarch64 due to
+        // no standard in the function epilogue - but the bet is that the GCC compiled code is
+        // seen more often than the clang one.
         FrameDesc* f = cc != NULL ? cc->findFrameDesc(pc) : &FrameDesc::default_frame;
 
         u8 cfa_reg = (u8)f->cfa;
