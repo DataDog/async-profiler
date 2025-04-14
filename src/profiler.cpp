@@ -326,19 +326,19 @@ jmethodID Profiler::getCurrentCompileTask() {
     return NULL;
 }
 
-int Profiler::getNativeTrace(void* ucontext, ASGCT_CallFrame* frames, EventType event_type, int tid, StackContext* java_ctx) {
+int Profiler::getNativeTrace(void* ucontext, ASGCT_CallFrame* frames, EventType event_type, int tid, StackContext* java_ctx, bool* truncated) {
     const void* callchain[MAX_NATIVE_FRAMES];
     int native_frames;
 
     // Use PerfEvents stack walker for execution samples, or basic stack walker for other events
     if (event_type == PERF_SAMPLE) {
-        native_frames = PerfEvents::walk(tid, ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx);
+        native_frames = PerfEvents::walk(tid, ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx, truncated);
     } else if (_cstack >= CSTACK_VM) {
         return 0;
     } else if (_cstack == CSTACK_DWARF) {
-        native_frames = StackWalker::walkDwarf(ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx);
+        native_frames = StackWalker::walkDwarf(ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx, truncated);
     } else {
-        native_frames = StackWalker::walkFP(ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx);
+        native_frames = StackWalker::walkFP(ucontext, callchain, MAX_NATIVE_FRAMES, java_ctx, truncated);
     }
 
     return convertNativeTrace(native_frames, callchain, frames, event_type);
@@ -631,6 +631,8 @@ u64 Profiler::recordSample(void* ucontext, u64 counter, EventType event_type, Ev
         return 0;
     }
 
+    bool truncated = false;
+
     u64 stack_walk_begin = _features.stats ? OS::nanotime() : 0;
 
     ASGCT_CallFrame* frames = _calltrace_buffer[lock_index]->_asgct_frames;
@@ -652,16 +654,16 @@ u64 Profiler::recordSample(void* ucontext, u64 counter, EventType event_type, Ev
             num_frames += makeFrame(frames + num_frames, BCI_ADDRESS, StackFrame(ucontext).pc());
         }
         if (_cstack != CSTACK_NO) {
-            num_frames += getNativeTrace(ucontext, frames + num_frames, event_type, tid, &java_ctx);
+            num_frames += getNativeTrace(ucontext, frames + num_frames, event_type, tid, &java_ctx, &truncated);
         }
     }
 
     if (_cstack == CSTACK_VMX) {
-        num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, VM_EXPERT);
+        num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, VM_EXPERT, &truncated);
     } else if (event_type <= WALL_CLOCK_SAMPLE) {
         // Async events
         if (_cstack == CSTACK_VM) {
-            num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, VM_NORMAL);
+            num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, VM_NORMAL, &truncated);
         } else {
             int java_frames = getJavaTraceAsync(ucontext, frames + num_frames, _max_stack_depth, &java_ctx);
             if (java_frames > 0 && java_ctx.pc != NULL && VMStructs::hasMethodStructs()) {
@@ -675,7 +677,7 @@ u64 Profiler::recordSample(void* ucontext, u64 counter, EventType event_type, Ev
     } else if (event_type >= ALLOC_SAMPLE && event_type <= ALLOC_OUTSIDE_TLAB && _alloc_engine == &alloc_tracer) {
         VMThread* vm_thread;
         if (VMStructs::hasStackStructs() && (vm_thread = VMThread::current()) != NULL) {
-            num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, vm_thread->anchor());
+            num_frames += StackWalker::walkVM(ucontext, frames + num_frames, _max_stack_depth, vm_thread->anchor(), &truncated);
         } else {
             num_frames += getJavaTraceAsync(ucontext, frames + num_frames, _max_stack_depth, &java_ctx);
         }
@@ -704,7 +706,7 @@ u64 Profiler::recordSample(void* ucontext, u64 counter, EventType event_type, Ev
         atomicInc(_total_stack_walk_time, stack_walk_end - stack_walk_begin);
     }
 
-    u32 call_trace_id = _call_trace_storage.put(num_frames, frames, counter);
+    u32 call_trace_id = _call_trace_storage.put(num_frames, frames, truncated, counter);
     _jfr.recordEvent(lock_index, tid, call_trace_id, event_type, event);
 
     _locks[lock_index].unlock();
@@ -721,7 +723,7 @@ void Profiler::recordExternalSample(u64 counter, int tid, EventType event_type, 
         num_frames += makeFrame(frames + num_frames, BCI_ERROR, OS::schedPolicy(tid));
     }
 
-    u32 call_trace_id = _call_trace_storage.put(num_frames, frames, counter);
+    u32 call_trace_id = _call_trace_storage.put(num_frames, frames, false, counter);
 
     u32 lock_index = getLockIndex(tid);
     if (!_locks[lock_index].tryLock() &&
