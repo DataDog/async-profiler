@@ -11,6 +11,8 @@ PACKAGE_DIR=/tmp/$(PACKAGE_NAME)
 
 ASPROF=bin/asprof
 JFRCONV=bin/jfrconv
+LIB_STATIC=lib/libasyncProfiler.a
+OBJECTS=$(patsubst src/%.cpp,build/obj/%.o,$(SOURCES))
 LIB_PROFILER=lib/libasyncProfiler.$(SOEXT)
 API_JAR=jar/async-profiler.jar
 CONVERTER_JAR=jar/jfr-converter.jar
@@ -124,13 +126,15 @@ ifneq (,$(findstring $(ARCH_TAG),x86 x64 arm64))
 endif
 
 
-.PHONY: all jar release build-test test clean coverage clean-coverage build-test-java build-test-cpp build-test-libs build-test-bins test-cpp test-java check-md format-md
+.PHONY: all jar release build-test build-static test native clean coverage clean-coverage build-test-java build-test-cpp build-test-libs build-test-bins test-cpp test-java check-md format-md
 
 all: build/bin build/lib build/$(LIB_PROFILER) build/$(ASPROF) jar build/$(JFRCONV)
 
 jar: build/jar build/$(API_JAR) build/$(CONVERTER_JAR)
 
 release: $(PACKAGE_NAME).$(PACKAGE_EXT)
+
+build-static: build/$(LIB_STATIC)
 
 $(PACKAGE_NAME).tar.gz: $(PACKAGE_DIR)
 	patchelf --remove-needed ld-linux-x86-64.so.2 --remove-needed ld-linux-aarch64.so.1 $(PACKAGE_DIR)/$(LIB_PROFILER)
@@ -152,7 +156,22 @@ $(PACKAGE_DIR): all LICENSE README.md
 	chmod -R 755 $(PACKAGE_DIR)
 	chmod 644 $(PACKAGE_DIR)/lib/* $(PACKAGE_DIR)/LICENSE $(PACKAGE_DIR)/README.md
 
-build/%:
+build/bin:
+	mkdir -p $@
+
+build/lib:
+	mkdir -p $@
+
+build/jar:
+	mkdir -p $@
+
+build/api:
+	mkdir -p $@
+
+build/converter:
+	mkdir -p $@
+
+build/obj:
 	mkdir -p $@
 
 build/$(ASPROF): src/main/* src/jattach/* src/fdtransfer.h
@@ -171,6 +190,14 @@ ifeq ($(MERGE),true)
 else
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEFS) $(INCLUDES) -fPIC -shared -o $@ $(SOURCES) $(LIBS)
 endif
+
+build/$(LIB_STATIC): $(OBJECTS)
+	@mkdir -p build/lib
+	ar rcs $@ $^
+
+build/obj/%.o: $(SOURCES) $(HEADERS)
+	@mkdir -p build/obj
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEFS) $(INCLUDES) -fPIC -c -o $@ $<
 
 build/$(API_JAR): $(API_SOURCES)
 	mkdir -p build/api
@@ -243,6 +270,12 @@ build/$(TEST_JAR): $(TEST_SOURCES) build/$(CONVERTER_JAR)
 	mkdir -p build/test
 	$(JAVAC) -source $(JAVA_TARGET) -target $(JAVA_TARGET) -Xlint:-options -cp "build/jar/*:build/converter/*" -d build/test $(TEST_SOURCES)
 	$(JAR) cf $@ -C build/test .
+
+native:
+	mkdir -p native/linux-x64 native/linux-arm64 native/macos
+	tar xfO async-profiler-$(PROFILER_VERSION)-linux-x64.tar.gz */build/libasyncProfiler.so > native/linux-x64/libasyncProfiler.so
+	tar xfO async-profiler-$(PROFILER_VERSION)-linux-arm64.tar.gz */build/libasyncProfiler.so > native/linux-arm64/libasyncProfiler.so
+	unzip -p async-profiler-$(PROFILER_VERSION)-macos.zip */build/libasyncProfiler.dylib > native/macos/libasyncProfiler.dylib
 
 check-md:
 	prettier -c README.md "docs/**/*.md"
