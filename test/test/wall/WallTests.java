@@ -50,6 +50,9 @@ public class WallTests {
         // there are valid [unknown] root-frames; we may sample the profiler process of parsing libraries and
         //   we don't have all the symbols and debug info for them available
         long unknown = countUnknownRoots(out);
+        if (unknown > 0) {
+            out.stream().filter(s -> s.contains("unknown")).forEach(s -> System.out.println("===> " + s));
+        }
 
         Assert.isLess(broken / (double)out.total(), 0.01);
         Assert.isEqual(0, unknown);
@@ -64,7 +67,9 @@ public class WallTests {
         //   we don't have all the symbols and debug info for them available
         long unknown = countUnknownRoots(out);
 
-        System.out.println(out);
+        if (unknown > 0) {
+            out.stream().filter(s -> s.contains("unknown")).forEach(s -> System.out.println("===> " + s));
+        }
 
         Assert.isLess(broken / (double)out.total(), 0.01);
         Assert.isEqual(0, unknown);
