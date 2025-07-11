@@ -57,12 +57,14 @@ public class WallTests {
 
     @Test(mainClass = PingPongClient.class)
     public void pingPongWallVM(TestProcess p) throws Exception {
-        Output out = p.profile("--cstack vm -e wall --interval 1ms -d 3 -o collapsed");
+        Output out = p.profile("--cstack vmx -e wall --interval 1ms -d 3 -o collapsed");
 
         long broken = out.stream().filter(s -> s.startsWith("[break_interpreted];")).mapToLong(Output::extractSamples).sum();
         // there are valid [unknown] root-frames; we may sample the profiler process of parsing libraries and
         //   we don't have all the symbols and debug info for them available
         long unknown = countUnknownRoots(out);
+
+        System.out.println(out);
 
         Assert.isLess(broken / (double)out.total(), 0.01);
         Assert.isEqual(0, unknown);
