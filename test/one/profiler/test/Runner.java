@@ -16,7 +16,7 @@ import java.util.logging.Logger;
 public class Runner {
     private static final Logger log = Logger.getLogger(Runner.class.getName());
 
-    private static final Os currentOs = detectOs();
+    public static final Os currentOs = detectOs();
     private static final Arch currentArch = detectArch();
     private static final Jvm currentJvm = detectJvm();
     private static final int currentJvmVersion = detectJvmVersion();

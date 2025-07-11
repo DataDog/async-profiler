@@ -7,6 +7,7 @@ package test.wall;
 
 import one.profiler.test.Output;
 import one.profiler.test.Assert;
+import one.profiler.test.Runner;
 import one.profiler.test.Test;
 import one.profiler.test.TestProcess;
 
@@ -31,6 +32,10 @@ public class WallTests {
 
     @Test(mainClass = test.wall.SocketTest.class)
     public void cpuWallVM(TestProcess p) throws Exception {
+        if (Runner.currentOs.isMusl()) {
+            // Wall profiling is not supported on musl systems
+            return;
+        }
         Output out = p.profile("--cstack vm -e cpu -d 3 -o collapsed");
         if (out.ratio("test/wall/SocketTest.main") <= 0.25) {
             System.out.println("===> " + out);
@@ -56,6 +61,11 @@ public class WallTests {
 
     @Test(mainClass = test.wall.WaitingClient.class)
     public void waitingWallVM(TestProcess p) throws Exception {
+        if (Runner.currentOs.isMusl()) {
+            // Wall profiling is not supported on musl systems
+            return;
+        }
+
         Output out = p.profile("--cstack vm -e wall --interval 1ms -d 3 -o collapsed");
 
         long broken = out.stream().filter(s -> s.startsWith("[break_interpreted];")).mapToLong(Output::extractSamples).sum();
@@ -69,6 +79,11 @@ public class WallTests {
 
     @Test(mainClass = test.wall.PingPongClient.class)
     public void pingPongWallVM(TestProcess p) throws Exception {
+        if (Runner.currentOs.isMusl()) {
+            // Wall profiling is not supported on musl systems
+            return;
+        }
+
         Output out = p.profile("--cstack vm -e wall --interval 1ms -d 3 -o collapsed");
 
         long broken = out.stream().filter(s -> s.startsWith("[break_interpreted];")).mapToLong(Output::extractSamples).sum();
