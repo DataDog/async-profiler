@@ -243,6 +243,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Should be preserved across setjmp/longjmp
     volatile int depth = 0;
 
+    JavaFrameAnchor* anchor = NULL;
+    bool recovered_from_anchor = false;
+
     if (vm_thread != NULL) {
         vm_thread->exception() = &crash_protection_ctx;
         if (setjmp(crash_protection_ctx) != 0) {
@@ -252,15 +255,15 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             }
             return depth;
         }
+        anchor = vm_thread->anchor();
     }
 
-    if (!VMStructs::goodPtr((const void*)fp)) {
-        JavaFrameAnchor* thrd_anchor = vm_thread != NULL ? vm_thread->anchor() : NULL;
+    if (!VMStructs::goodPtr((const void*)fp) && detail < VM_EXPERT) {
         // top fp is somehow corrupted; let's try to recover from the last known Java frame
-        if (thrd_anchor != NULL && thrd_anchor->lastJavaSP() != 0) {
-            sp = thrd_anchor->lastJavaSP();
-            fp = thrd_anchor->lastJavaFP();
-            pc = thrd_anchor->lastJavaPC();
+        if (anchor != NULL && anchor->lastJavaSP() != 0) {
+            sp = anchor->lastJavaSP();
+            fp = anchor->lastJavaFP();
+            pc = anchor->lastJavaPC();
         }
     }
 
@@ -345,6 +348,18 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                         }
                         continue;
                     }
+                }
+
+                if (!recovered_from_anchor && anchor && detail < VM_EXPERT) {
+                    if (anchor->lastJavaPC() == nullptr || anchor->lastJavaSP() == 0) {
+                       // End of Java stack
+                        break;
+                    }
+                    fp = anchor->lastJavaFP();
+                    sp = anchor->lastJavaSP();
+                    pc = anchor->lastJavaPC();
+                    recovered_from_anchor = true;
+                    continue;
                 }
 
                 fillFrame(frames[depth++], BCI_ERROR, "break_interpreted");
@@ -439,6 +454,15 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             } else {
                 // Stack bottom
                 break;
+            }
+        }
+
+        if (detail < VM_EXPERT && anchor && !recovered_from_anchor && !VMStructs::goodPtr((const void*)fp)) {
+            if (anchor->lastJavaPC() != nullptr && anchor->lastJavaSP() != 0) {
+                recovered_from_anchor = true;
+                sp = anchor->lastJavaSP();
+                fp = anchor->lastJavaFP();
+                pc = anchor->lastJavaPC();
             }
         }
 
