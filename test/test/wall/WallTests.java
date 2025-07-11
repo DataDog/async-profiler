@@ -32,6 +32,16 @@ public class WallTests {
     @Test(mainClass = test.wall.SocketTest.class)
     public void cpuWallVM(TestProcess p) throws Exception {
         Output out = p.profile("--cstack vm -e cpu -d 3 -o collapsed");
+        if (out.ratio("test/wall/SocketTest.main") <= 0.25) {
+            System.out.println("===> " + out);
+        }
+        if (out.ratio("test/wall/BusyClient.run") <= 0.25) {
+            System.out.println("===> " + out);
+        }
+        if (out.ratio("test/wall/IdleClient.run") >= 0.05) {
+            System.out.println("===> " + out);
+        }
+
         Assert.isGreater(out.ratio("test/wall/SocketTest.main"), 0.25);
         Assert.isGreater(out.ratio("test/wall/BusyClient.run"), 0.25);
         Assert.isLess(out.ratio("test/wall/IdleClient.run"), 0.05);
