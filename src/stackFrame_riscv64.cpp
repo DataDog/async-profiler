@@ -105,4 +105,9 @@ bool StackFrame::isSyscall(instruction_t* pc) {
     return (*pc) == 0x00000073;
 }
 
+bool StackFrame::unwindFrameless(const void*& pc, uintptr_t& sp, uintptr_t& fp, uintptr_t bottom) {
+  pc = *(const void*)link();
+  return false;
+}
+
 #endif // riscv

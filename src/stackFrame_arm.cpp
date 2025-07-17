@@ -123,4 +123,9 @@ bool StackFrame::isSyscall(instruction_t* pc) {
     return *pc == 0xef000000;
 }
 
+bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
+    pc = *(const void**)link();
+    return true;
+}
+
 #endif // defined(__arm__) || defined(__thumb__)

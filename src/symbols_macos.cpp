@@ -11,6 +11,26 @@
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
+#include <mach/mach.h>
+#include <mach-o/dyld_images.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Exists on every macOS since 10.4, single underscore only */
+extern const struct dyld_all_image_infos *
+_dyld_get_all_image_infos(void) __attribute__((weak_import));
+
+/* On 10.13+ Apple also exports the double-underscore alias; keep both names
+   working by mapping the public one to the alias when necessary              */
+extern intptr_t
+_dyld_get_image_slide(const struct mach_header *) __attribute__((weak_import));
+
+#ifdef __cplusplus
+}   /* extern "C" */
+#endif
+
 #include "symbols.h"
 #include "log.h"
 
@@ -144,8 +164,48 @@ static std::unordered_set<const void*> _parsed_libraries;
 void Symbols::parseKernelSymbols(CodeCache* cc) {
 }
 
+static const dyld_all_image_infos* getDyldInfos() {
+    task_dyld_info_data_t dti{};
+    mach_msg_type_number_t cnt = TASK_DYLD_INFO_COUNT;
+
+    if (task_info(mach_task_self(), TASK_DYLD_INFO,
+                  reinterpret_cast<task_info_t>(&dti), &cnt) == KERN_SUCCESS) {
+        return reinterpret_cast<const dyld_all_image_infos*>(dti.all_image_info_addr);
+    }
+    return nullptr;
+}
+
+bool Symbols::isInMuslLoader(const void* pc) {
+  return false; // Not applicable for macOS, as musl is not used
+}
+
 void Symbols::parseLibraries(CodeCacheArray* array, bool kernel_symbols) {
     MutexLocker ml(_parse_lock);
+
+    const dyld_all_image_infos* infos = getDyldInfos();
+    if (infos && infos->dyldImageLoadAddress) {
+        const mach_header* image_base = infos->dyldImageLoadAddress;
+        const char* path = infos->dyldPath ? infos->dyldPath : "/usr/lib/dyld";
+        const char* vmaddr_slide = reinterpret_cast<const char*>(_dyld_get_image_slide(image_base));
+
+        int count = array->count();
+        CodeCache* cc = new CodeCache(path, count);
+        cc->setTextBase(vmaddr_slide);
+
+        UnloadProtection handle(cc);
+        if (handle.isValid()) {
+            MachOParser parser(cc, image_base, vmaddr_slide);
+            if (!parser.parse()) {
+                Log::warn("Could not parse symbols from %s", path);
+            }
+
+            cc->sort();
+            array->add(cc);
+        } else {
+            delete cc;
+        }
+    }
+
     uint32_t images = _dyld_image_count();
 
     for (uint32_t i = 0; i < images; i++) {

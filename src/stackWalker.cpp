@@ -9,6 +9,7 @@
 #include "profiler.h"
 #include "safeAccess.h"
 #include "stackFrame.h"
+#include "symbols.h"
 #include "vmStructs.h"
 
 
@@ -17,7 +18,6 @@ const uintptr_t MAX_WALK_SIZE = 0x100000;
 const intptr_t MAX_FRAME_SIZE = 0x40000;
 const intptr_t MAX_INTERPRETER_FRAME_SIZE = 0x1000;
 const intptr_t DEAD_ZONE = 0x1000;
-
 
 static inline bool aligned(uintptr_t ptr) {
     return (ptr & (sizeof(uintptr_t) - 1)) == 0;
@@ -228,6 +228,23 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth, 
     return walkVM(ucontext, frames, max_depth, VM_BASIC, pc, sp, fp);
 }
 
+static int tryRecoverFromAnchor(JavaFrameAnchor** anchor, bool* in_java,
+                                 uintptr_t& sp, uintptr_t& fp, const void*& pc) {
+    if (*anchor != NULL && !*in_java && (*anchor)->lastJavaFP() > 0) {
+        if (!VMStructs::goodPtr((void*)((*anchor)->lastJavaSP())) && !VMStructs::goodPtr((void*)(*anchor)->lastJavaFP())) {
+            // end of Java stack; break stack walking
+            return -1;
+        }
+        fp = VMStructs::goodPtr((const void*)(*anchor)->lastJavaFP()) ? (*anchor)->lastJavaFP() : 0;
+        sp = VMStructs::goodPtr((const void*)(*anchor)->lastJavaSP()) ? (*anchor)->lastJavaSP() : 0;
+        pc = (*anchor)->lastJavaPC();
+
+        *in_java = true;
+        return 1;
+    }
+    return 0;
+}
+
 int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                         StackDetail detail, const void* pc, uintptr_t sp, uintptr_t fp) {
     StackFrame frame(ucontext);
@@ -243,6 +260,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Should be preserved across setjmp/longjmp
     volatile int depth = 0;
 
+    JavaFrameAnchor* anchor = NULL;
+    bool in_java = false;
+
     if (vm_thread != NULL) {
         vm_thread->exception() = &crash_protection_ctx;
         if (setjmp(crash_protection_ctx) != 0) {
@@ -252,11 +272,13 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             }
             return depth;
         }
+        anchor = vm_thread->anchor();
     }
 
     // Walk until the bottom of the stack or until the first Java frame
     while (depth < max_depth) {
         if (CodeHeap::contains(pc)) {
+            in_java = true;
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
                 fillFrame(frames[depth++], BCI_ERROR, "unknown_nmethod");
@@ -379,7 +401,48 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 }
             }
         } else {
-            fillFrame(frames[depth++], BCI_NATIVE_FRAME, profiler->findNativeMethod(pc));
+            const char* method = profiler->findNativeMethod(pc);
+            if (method == NULL) {
+                if (!method) {
+                    // this would produce [unknown] frames; let's try harder to recover
+                    if (!profiler->isAddressInCode(pc)) {
+                        // bogus PC; let's try recovering from java frame anchor
+                        int res = tryRecoverFromAnchor(&anchor, &in_java, sp, fp, pc);
+                        if (res == 0) {
+                            // record skipped frames, replace the bogus PC with the leaf Java frame and continue
+                            fillFrame(frames[depth++], BCI_ERROR, "skipped frames");
+                            continue;
+                        } else if (res == -1) {
+                            // end of Java stack; break stack walking
+                            break;
+                        } else if (res == 1) {
+                            // unable to recover from anchor; we are completely lost
+                            fillFrame(frames[depth++], BCI_ERROR, "break_walk");
+                            break;
+                        }
+                    }
+                }
+            }
+            // musl is 'special' - the PLT veneers have debug info but if we land before the SP is pushed, it will take us to weird places
+            if (OS::isMusl() && Symbols::isInMuslLoader(pc)) {
+                if (depth == 1) {
+                    const void* pc_back = pc;
+                    uintptr_t sp_back = sp;
+                    uintptr_t fp_back = fp;
+
+                    if (frame.unwindFramelessLeaf(pc, sp, fp)) {
+                        if (profiler->isAddressInCode(pc)) {
+                            // the unwind looks plausible, let's use it
+                            continue;
+                        }
+                        // something went wrong, restore the registers and try the default path
+                        pc = pc_back;
+                        sp = sp_back;
+                        fp = fp_back;
+                    }
+                }
+            }
+            fillFrame(frames[depth++], BCI_NATIVE_FRAME, method);
         }
 
         uintptr_t prev_sp = sp;
@@ -389,8 +452,16 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         u8 cfa_reg = (u8)f->cfa;
         int cfa_off = f->cfa >> 8;
         if (cfa_reg == DW_REG_SP) {
+            if (sp >= bottom || !VMStructs::goodPtr((const void*)sp)) {
+                // sanity check; we don't want to keep unwinding based on bogus values
+                break;
+            }
             sp = sp + cfa_off;
         } else if (cfa_reg == DW_REG_FP) {
+            if (!VMStructs::goodPtr((const void*)fp)) {
+                // sanity check; we don't want to keep unwinding based on bogus values
+                break;
+            }
             sp = fp + cfa_off;
         } else if (cfa_reg == DW_REG_PLT) {
             sp += ((uintptr_t)pc & 15) >= 11 ? cfa_off * 2 : cfa_off;
