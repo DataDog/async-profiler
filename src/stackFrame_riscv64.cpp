@@ -106,7 +106,7 @@ bool StackFrame::isSyscall(instruction_t* pc) {
 }
 
 bool StackFrame::unwindFrameless(const void*& pc, uintptr_t& sp, uintptr_t& fp, uintptr_t bottom) {
-  pc = *(const void*)link();
+  pc = (const void*)link();
   return false;
 }
 

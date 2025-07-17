@@ -104,9 +104,7 @@ bool StackFrame::isSyscall(instruction_t* pc) {
 }
 
 bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
-    pc = ((uintptr_t *)this->fp())[-1];
-    sp = this->fp();
-    fp = ((uintptr_t *)this->fp())[-2]
+    pc = (const void*)link();
     return true;
 }
 

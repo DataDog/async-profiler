@@ -173,7 +173,7 @@ bool StackFrame::unwindAtomicStub(const void*& pc) {
 }
 
 bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
-    pc = *(const void**)link();
+    pc = (const void*)link();
     return true;
 }
 
