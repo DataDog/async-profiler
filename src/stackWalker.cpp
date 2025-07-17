@@ -287,8 +287,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 FrameTypeId type = detail != VM_BASIC && level >= 1 && level <= 3 ? FRAME_C1_COMPILED : FRAME_JIT_COMPILED;
                 fillFrame(frames[depth++], type, 0, nm->method()->id());
 
+                bool should_break = true;
+                int scope_offset = nm->findScopeOffset(pc);
                 if (nm->isFrameCompleteAt(pc)) {
-                    int scope_offset = nm->findScopeOffset(pc);
                     if (scope_offset > 0) {
                         depth--;
                         ScopeDesc scope(nm);
@@ -311,9 +312,13 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                     continue;
                 } else if (frame.unwindCompiled(nm, (uintptr_t&)pc, sp, fp) && profiler->isAddressInCode(pc)) {
                     continue;
+                }  else if (nm->isIntrinsic() && scope_offset < 0) {
+                    // let's make this fall-through and try applying the default unwinding on native-looking method
+                    should_break = false;
                 }
-
-                fillFrame(frames[depth++], BCI_ERROR, "break_compiled");
+                if (should_break) {
+                    fillFrame(frames[depth++], BCI_ERROR, "break_compiled");
+                }
                 break;
             } else if (nm->isInterpreter()) {
                 if (vm_thread != NULL && vm_thread->inDeopt()) {
