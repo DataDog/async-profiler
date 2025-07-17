@@ -225,4 +225,11 @@ bool StackFrame::isSyscall(instruction_t* pc) {
     return pc[0] == 0x0f && pc[1] == 0x05;
 }
 
+bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
+    pc = *(const void**)this->sp();
+    sp = this->sp() + 8;
+    fp = *(uintptr_t*)this->fp();
+    return true;
+}
+
 #endif // __x86_64__

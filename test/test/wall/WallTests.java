@@ -5,25 +5,107 @@
 
 package test.wall;
 
+import one.profiler.test.Os;
 import one.profiler.test.Output;
 import one.profiler.test.Assert;
 import one.profiler.test.Test;
 import one.profiler.test.TestProcess;
 
+import java.util.concurrent.atomic.LongAdder;
+
 public class WallTests {
 
-    @Test(mainClass = SocketTest.class)
-    public void cpuWall(TestProcess p) throws Exception {
-        Output out = p.profile("-e cpu -d 3 -o collapsed");
-        Assert.isGreater(out.ratio("test/wall/SocketTest.main"), 0.25);
-        Assert.isGreater(out.ratio("test/wall/BusyClient.run"), 0.25);
-        Assert.isLess(out.ratio("test/wall/IdleClient.run"), 0.05);
+     @Test(mainClass = test.wall.SocketTest.class)
+     public void cpuWall(TestProcess p) throws Exception {
+         Output out = p.profile("-e cpu -d 3 -o collapsed");
+         Assert.isGreater(out.ratio("test/wall/SocketTest.main"), 0.25);
+         Assert.isGreater(out.ratio("test/wall/BusyClient.run"), 0.25);
+         Assert.isLess(out.ratio("test/wall/IdleClient.run"), 0.05);
 
-        out = p.profile("-e wall -d 3 -o collapsed");
-        long s1 = out.samples("test/wall/SocketTest.main");
-        long s2 = out.samples("test/wall/BusyClient.run");
-        long s3 = out.samples("test/wall/IdleClient.run");
-        assert s1 > 10 && s2 > 10 && s3 > 10;
-        assert Math.abs(s1 - s2) < 5 && Math.abs(s2 - s3) < 5 && Math.abs(s3 - s1) < 5;
+         out = p.profile("-e wall -d 3 -o collapsed");
+         long s1 = out.samples("test/wall/SocketTest.main");
+         long s2 = out.samples("test/wall/BusyClient.run");
+         long s3 = out.samples("test/wall/IdleClient.run");
+         assert s1 > 10 && s2 > 10 && s3 > 10;
+         assert Math.abs(s1 - s2) < 5 && Math.abs(s2 - s3) < 5 && Math.abs(s3 - s1) < 5;
+     }
+
+     @Test(mainClass = test.wall.SocketTest.class)
+     public void cpuWallVM(TestProcess p) throws Exception {
+        if (Os.current().isMusl()) {
+            // on musl libc, we have a lot of [unknown] roots and [broken] walks, so we don't assert it
+            return;
+        }
+         Output out = p.profile("--cstack vm -e cpu -d 3 -o collapsed");
+         Assert.isGreater(out.ratio("test/wall/SocketTest.main"), 0.25);
+         Assert.isGreater(out.ratio("test/wall/BusyClient.run"), 0.25);
+         Assert.isLess(out.ratio("test/wall/IdleClient.run"), 0.05);
+
+         out = p.profile("--cstack vm -e wall -d 3 -o collapsed");
+         long s1 = out.samples("test/wall/SocketTest.main");
+         long s2 = out.samples("test/wall/BusyClient.run");
+         long s3 = out.samples("test/wall/IdleClient.run");
+         assert s1 > 10 && s2 > 10 && s3 > 10;
+         assert Math.abs(s1 - s2) < 5 && Math.abs(s2 - s3) < 5 && Math.abs(s3 - s1) < 5;
+     }
+
+    @Test(mainClass = test.wall.WaitingClient.class)
+    public void waitingWallVM(TestProcess p) throws Exception {
+        if (Os.current().isMusl()) {
+            // on musl libc, we have a lot of [unknown] roots and [broken] walks, so we don't assert it
+            return;
+        }
+        Output out = p.profile("--cstack vm -e wall --interval 1ms -d 3 -o collapsed");
+
+        long broken = out.stream().filter(s -> s.startsWith("[break_")).mapToLong(Output::extractSamples).sum();
+        // there are valid [unknown] root-frames; we may sample the profiler process of parsing libraries and
+        //   we don't have all the symbols and debug info for them available
+        long unknown = countUnknownRoots(out);
+
+        try {
+            Assert.isLess(broken / (double)out.total(), 0.01);
+            Assert.isEqual(0, unknown);
+        } catch (AssertionError e) {
+            System.out.println("=== Broken frames: " + broken + " ===");
+            out.stream().filter(s -> s.startsWith("[break_")).forEach(System.out::println);
+            System.out.println("=== Unknown roots: " + unknown + " ===");
+            out.stream().filter(s -> s.startsWith("[unknown]") && !s.contains("parseLibraries")).forEach(System.out::println);
+            throw e;
+        }
+    }
+
+    @Test(mainClass = test.wall.PingPongClient.class)
+    public void pingPongWallVM(TestProcess p) throws Exception {
+        if (Os.current().isMusl()) {
+            // on musl libc, we have a lot of [unknown] roots and [broken] walks, so we don't assert it
+            return;
+        }
+        Output out = p.profile("--cstack vm -e wall --interval 1ms -d 3 -o collapsed");
+
+        long broken = out.stream().filter(s -> s.startsWith("[break_")).mapToLong(Output::extractSamples).sum();
+        // there are valid [unknown] root-frames; we may sample the profiler process of parsing libraries and
+        //   we don't have all the symbols and debug info for them available
+        long unknown = countUnknownRoots(out);
+
+        try {
+            Assert.isLess(broken / (double)out.total(), 0.01);
+            Assert.isEqual(0, unknown);
+        } catch (AssertionError e) {
+            System.out.println("=== Broken frames: " + broken + " ===");
+            out.stream().filter(s -> s.startsWith("[break_")).forEach(System.out::println);
+            System.out.println("=== Unknown roots: " + unknown + " ===");
+            out.stream().filter(s -> s.startsWith("[unknown]") && !s.contains("parseLibraries")).forEach(System.out::println);
+            throw e;
+        }
+    }
+
+    private static long countUnknownRoots(Output out) {
+        LongAdder unknownRoots = new LongAdder();
+
+        out.stream().filter(s -> s.startsWith("[unknown]") && !s.contains("parseLibraries")).forEach(l -> {
+            unknownRoots.add(Output.extractSamples(l));
+        });
+
+        return unknownRoots.sum();
     }
 }

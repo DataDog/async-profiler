@@ -16,44 +16,12 @@ import java.util.logging.Logger;
 public class Runner {
     private static final Logger log = Logger.getLogger(Runner.class.getName());
 
-    private static final Os currentOs = detectOs();
-    private static final Arch currentArch = detectArch();
+    private static final Os currentOs = Os.current();
+    private static final Arch currentArch = Arch.current();
     private static final Jvm currentJvm = detectJvm();
     private static final int currentJvmVersion = detectJvmVersion();
 
     private static final String logDir = System.getProperty("logDir", "");
-
-    private static Os detectOs() {
-        String os = System.getProperty("os.name").toLowerCase();
-        if (os.contains("linux")) {
-            return Os.LINUX;
-        } else if (os.contains("mac")) {
-            return Os.MACOS;
-        } else if (os.contains("windows")) {
-            return Os.WINDOWS;
-        }
-        throw new IllegalStateException("Unknown OS type");
-    }
-
-    private static Arch detectArch() {
-        String arch = System.getProperty("os.arch");
-        if (arch.contains("x86_64") || arch.contains("amd64")) {
-            return Arch.X64;
-        } else if (arch.contains("aarch64")) {
-            return Arch.ARM64;
-        } else if (arch.contains("arm")) {
-            return Arch.ARM32;
-        } else if (arch.contains("ppc64le")) {
-            return Arch.PPC64LE;
-        } else if (arch.contains("riscv64")) {
-            return Arch.RISCV64;
-        } else if (arch.contains("loongarch64")) {
-            return Arch.LOONGARCH64;
-        } else if (arch.endsWith("86")) {
-            return Arch.X86;
-        }
-        throw new IllegalStateException("Unknown CPU architecture");
-    }
 
     private static Jvm detectJvm() {
         // Example javaHome: /usr/lib/jvm/amazon-corretto-17.0.8.7.1-linux-x64

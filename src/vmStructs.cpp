@@ -62,6 +62,7 @@ int VMStructs::_nmethod_metadata_offset = -1;
 int VMStructs::_nmethod_immutable_offset = -1;
 int VMStructs::_method_constmethod_offset = -1;
 int VMStructs::_method_code_offset = -1;
+int VMStructs::_method_intrinsic_id_offset = -1;
 int VMStructs::_constmethod_constants_offset = -1;
 int VMStructs::_constmethod_idnum_offset = -1;
 int VMStructs::_constmethod_size = -1;
@@ -219,6 +220,8 @@ void VMStructs::initOffsets() {
                     _method_constmethod_offset = *(int*)(entry + offset_offset);
                 } else if (strcmp(field, "_code") == 0) {
                     _method_code_offset = *(int*)(entry + offset_offset);
+                } else if (strcmp(field, "_intrinsic_id") == 0) {
+                    _method_intrinsic_id_offset = *(int*)(entry + offset_offset);
                 }
             } else if (strcmp(type, "ConstMethod") == 0) {
                 if (strcmp(field, "_constants") == 0) {

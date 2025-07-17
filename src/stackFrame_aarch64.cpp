@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/syscall.h>
+#include "arch.h"
 #include "stackFrame.h"
 #include "safeAccess.h"
 #include "vmStructs.h"
@@ -169,6 +170,11 @@ bool StackFrame::unwindAtomicStub(const void*& pc) {
         }
     }
     return false;
+}
+
+bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
+    pc = (const void*)link();
+    return true;
 }
 
 void StackFrame::adjustSP(const void* entry, const void* pc, uintptr_t& sp) {

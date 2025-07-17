@@ -79,6 +79,28 @@ static const void* getMainPhdr() {
 static const void* _main_phdr = getMainPhdr();
 static const char* _ld_base = (const char*)getauxval(AT_BASE);
 
+struct { uintptr_t lo, hi; } _musl = {0, 0};
+
+static void cache_musl_loader_range() {
+    dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void*) {
+        if (info->dlpi_name && strstr(info->dlpi_name, "ld-musl") != nullptr) {
+            for (int i = 0; i < info->dlpi_phnum; i++) {
+                const ElfW(Phdr)& ph = info->dlpi_phdr[i];
+                if (ph.p_type == PT_LOAD && (ph.p_flags & PF_X)) {
+                    uintptr_t base = info->dlpi_addr + ph.p_vaddr;
+                    _musl.lo = base;
+                    _musl.hi = base + ph.p_memsz;
+                    return 1;          // stop iteration
+                }
+            }
+        }
+        return 0;
+    }, nullptr);
+}
+
+/* call once during agent start-up */
+static int _dummy = (cache_musl_loader_range(), 0);
+
 static bool isMainExecutable(const char* image_base, const void* map_end) {
     return _main_phdr != NULL && _main_phdr >= image_base && _main_phdr < map_end;
 }
@@ -775,6 +797,10 @@ static void collectSharedLibraries(std::unordered_map<u64, SharedLibrary>& libs,
 
     free(str);
     fclose(f);
+}
+
+bool Symbols::isInMuslLoader(const void* address) {
+    return (uintptr_t)address >= _musl.lo && (uintptr_t)address < _musl.hi;
 }
 
 void Symbols::parseLibraries(CodeCacheArray* array, bool kernel_symbols) {

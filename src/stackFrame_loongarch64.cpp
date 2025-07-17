@@ -103,4 +103,9 @@ bool StackFrame::isSyscall(instruction_t* pc) {
     return (*pc) == 0x002b0000;
 }
 
+bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
+    pc = (const void*)link();
+    return true;
+}
+
 #endif // __loongarch_lp64

@@ -149,4 +149,8 @@ bool StackFrame::isSyscall(instruction_t* pc) {
     return (*pc & 0x1f) == 17;
 }
 
+bool StackFrame::unwindFramelessLeaf(const void*& pc, uintptr_t& sp, uintptr_t& fp) {
+    return false;
+}
+
 #endif // defined(__PPC64__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)

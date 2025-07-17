@@ -23,6 +23,8 @@ class Symbols {
     static bool haveKernelSymbols() {
         return _have_kernel_symbols;
     }
+
+    static bool isInMuslLoader(const void* pc);
 };
 
 class UnloadProtection {
