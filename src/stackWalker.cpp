@@ -181,6 +181,14 @@ int StackWalker::walkDwarf(void* ucontext, const void** callchain, int max_depth
                 break;
             }
 
+            if (EMPTY_FRAME_SIZE > 0 || f->pc_off != DW_LINK_REGISTER) {
+                pc = stripPointer(SafeAccess::load((void**)(sp + f.pc_off)));
+            } else if (depth == 1) {
+                pc = (const void*)frame.link();
+            } else {
+                break;
+            }
+
             if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f.fp_off != DW_SAME_FP) {
                 // AArch64 default_frame
                 sp = defaultSenderSP(sp, fp);
@@ -487,6 +495,14 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
 
             if (EMPTY_FRAME_SIZE > 0 || f.pc_off != DW_LINK_REGISTER) {
                 pc = stripPointer(SafeAccess::load((void**)(sp + f.pc_off)));
+            } else if (depth == 1) {
+                pc = (const void*)frame.link();
+            } else {
+                break;
+            }
+
+            if (EMPTY_FRAME_SIZE > 0 || f.pc_off != DW_LINK_REGISTER) {
+                pc = stripPointer(*(void**)(sp + f.pc_off));
             } else if (depth == 1) {
                 pc = (const void*)frame.link();
             } else {
