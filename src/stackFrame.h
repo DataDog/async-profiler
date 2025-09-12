@@ -6,6 +6,7 @@
 #ifndef _STACKFRAME_H
 #define _STACKFRAME_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <ucontext.h>
 #include "arch.h"
