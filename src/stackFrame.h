@@ -6,6 +6,7 @@
 #ifndef _STACKFRAME_H
 #define _STACKFRAME_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <ucontext.h>
 #include "arch.h"
@@ -65,8 +66,13 @@ class StackFrame {
     }
 
     bool unwindStub(instruction_t* entry, const char* name, uintptr_t& pc, uintptr_t& sp, uintptr_t& fp);
-    bool unwindCompiled(NMethod* nm, uintptr_t& pc, uintptr_t& sp, uintptr_t& fp);
     bool unwindAtomicStub(const void*& pc);
+
+    // TODO: this function will be removed once `vm` becomes the default stack walking mode
+    bool unwindCompiled(NMethod* nm, uintptr_t& pc, uintptr_t& sp, uintptr_t& fp);
+
+    bool unwindPrologue(NMethod* nm, uintptr_t& pc, uintptr_t& sp, uintptr_t& fp);
+    bool unwindEpilogue(NMethod* nm, uintptr_t& pc, uintptr_t& sp, uintptr_t& fp);
 
     void adjustSP(const void* entry, const void* pc, uintptr_t& sp);
 
