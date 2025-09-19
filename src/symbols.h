@@ -9,6 +9,8 @@
 #include "codeCache.h"
 #include "mutex.h"
 
+#include <stdint.h>
+
 
 class Symbols {
   private:
@@ -23,6 +25,8 @@ class Symbols {
     static bool haveKernelSymbols() {
         return _have_kernel_symbols;
     }
+    // Fast range check: does this PC lie in libc or libpthread?
+    static bool isLibcOrPthreadAddress(uintptr_t pc);
 };
 
 class UnloadProtection {
