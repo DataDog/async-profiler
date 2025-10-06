@@ -396,9 +396,10 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             if (detail < VM_EXPERT) {
                 // These workarounds will minimize the number of unknown frames for 'vm'
                 // We want to keep the 'raw' data in 'vmx', though
-                if (symbol == NULL && depth > 0 && Symbols::isLibcOrPthreadAddress((uintptr_t)pc)) {
+                if (symbol == NULL && Symbols::isLibcOrPthreadAddress((uintptr_t)pc)) {
                     // We might not have the libc symbols available
                     // The unwinding is also not super reliable; best to jump out if this is not the leaf
+                    fillFrame(frames[depth++], BCI_NATIVE_FRAME, "[libc/pthread]");
                     break;
                 } else if (symbol == NULL) {
                     const char* prev_symbol = prev_native_pc != NULL ? profiler->findNativeMethod(prev_native_pc) : NULL;
