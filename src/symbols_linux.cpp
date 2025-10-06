@@ -180,7 +180,6 @@ static bool pc_in_range(uintptr_t pc, const Range* r) {
 #include <poll.h>
 #include "vmEntry.h"
 
-
 // Workaround for JDK-8312065 on JDK 8:
 // replace poll() implementation with ppoll() which is restartable
 static int poll_hook(struct pollfd* fds, nfds_t nfds, int timeout) {
@@ -1019,7 +1018,6 @@ UnloadProtection::~UnloadProtection() {
 }
 
 bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
-    // Caller should already normalize boundary PCs (pc-1) if using return addresses.
     init_lib_ranges_once();
     // Fast, allocation-free integer checks — no strings involved.
     if (pc_in_range(pc, &g_libc)) return true;
