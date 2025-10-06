@@ -54,7 +54,7 @@ struct UnifiedCtx {
 };
 
 // Unified callback for both range computation and main phdr collection
-static int unified_phdr_cb(dl_phdr_info* info, size_t, void* data) {
+static int unified_phdr_cb(dl_phdr_info* info, size_t /*unused*/, void* data) {
     UnifiedCtx* ctx = (UnifiedCtx*)data;
 
     // Main executable's program header (first entry)
