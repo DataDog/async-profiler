@@ -9,6 +9,7 @@
 #include "profiler.h"
 #include "safeAccess.h"
 #include "stackFrame.h"
+#include "symbols.h"
 #include "vmStructs.h"
 
 
@@ -246,7 +247,9 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Should be preserved across setjmp/longjmp
     volatile int depth = 0;
 
+    JavaFrameAnchor* anchor = NULL;
     if (vm_thread != NULL) {
+        anchor = vm_thread->anchor();
         vm_thread->exception() = &crash_protection_ctx;
         if (setjmp(crash_protection_ctx) != 0) {
             vm_thread->exception() = saved_exception;
@@ -257,9 +260,12 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
         }
     }
 
+    const void* prev_native_pc = NULL;
+
     // Walk until the bottom of the stack or until the first Java frame
     while (depth < max_depth) {
         if (CodeHeap::contains(pc)) {
+            prev_native_pc = NULL; // we are in JVM code, no previous 'native' PC
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
                 fillFrame(frames[depth++], BCI_ERROR, "unknown_nmethod");
@@ -386,7 +392,49 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                 }
             }
         } else {
-            fillFrame(frames[depth++], BCI_NATIVE_FRAME, profiler->findNativeMethod(pc));
+            const char* symbol = profiler->findNativeMethod(pc);
+            if (detail < VM_EXPERT) {
+                // These workarounds will minimize the number of unknown frames for 'vm'
+                // We want to keep the 'raw' data in 'vmx', though
+                if (symbol == NULL) {
+                    // let's see if we have the thread java frame anchor and if yes, let's use it
+                    if (anchor) {
+                        uintptr_t prev_sp = sp;
+                        sp = anchor->lastJavaSP();
+                        fp = anchor->lastJavaFP();
+                        pc = anchor->lastJavaPC();
+                        if (sp != 0 && pc != NULL) {
+                            // already used the anchor; disable it
+                            anchor = NULL;
+                            if (sp < prev_sp || sp >= bottom || !aligned(sp)) {
+                                fillFrame(frames[depth++], BCI_ERROR, "break_no_anchor");
+                                break;
+                            }
+                            // we restored from Java frame; clean the prev_native_pc
+                            prev_native_pc = NULL;
+                            if (depth > 0) {
+                                fillFrame(frames[depth++], BCI_ERROR, "[skipped frames]");
+                            }
+                            continue;
+                        }
+                    }
+                    const char* prev_symbol = prev_native_pc != NULL ? profiler->findNativeMethod(prev_native_pc) : NULL;
+                    if (prev_symbol != NULL && strstr(prev_symbol, "thread_start")) {
+                        // Unwinding from Rust 'thread_start' but not having enough info to do it correctly
+                        // Rather, just assume that this is the root frame
+                        break;
+                    }
+                    if (Symbols::isLibcOrPthreadAddress((uintptr_t)pc)) {
+                        // We might not have the libc symbols available
+                        // The unwinding is also not super reliable; best to jump out if this is not the leaf
+                        fillFrame(frames[depth++], BCI_NATIVE_FRAME, "[libc/pthread]");
+                        break;
+                    }
+                    fillFrame(frames[depth++], BCI_ERROR, "break_no_anchor");
+                    break;
+                }
+            }
+            fillFrame(frames[depth++], BCI_NATIVE_FRAME, symbol);
         }
 
         uintptr_t prev_sp = sp;
@@ -415,7 +463,8 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             break;
         }
 
-        const void* prev_pc = pc; 
+        // store the previous pc before unwinding
+        prev_native_pc = pc;
         if (f->fp_off & DW_PC_OFFSET) {
             pc = (const char*)pc + (f->fp_off >> 1);
         } else {
@@ -440,7 +489,7 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
             }
         }
 
-        if (inDeadZone(pc) || (pc == prev_pc && sp == prev_sp)) {
+        if (inDeadZone(pc) || (pc == prev_native_pc && sp == prev_sp)) {
             break;
         }
     }

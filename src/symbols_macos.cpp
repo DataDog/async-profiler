@@ -183,4 +183,8 @@ void Symbols::parseLibraries(CodeCacheArray* array, bool kernel_symbols) {
     }
 }
 
+bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
+    return false;
+}
+
 #endif // __APPLE__

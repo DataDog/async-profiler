@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <link.h>
 #include <linux/limits.h>
+#include <pthread.h>
 #include <sys/auxv.h>
 #include "symbols.h"
 #include "dwarf.h"
@@ -27,6 +28,152 @@
 #include "log.h"
 #include "os.h"
 
+// Simple address range
+struct Range {
+    uintptr_t start;
+    uintptr_t end;
+};
+
+static bool range_valid(const Range* r) {
+    return r->start && r->end && r->end > r->start;
+}
+
+static Range g_libc = {0, 0};
+static Range g_libpthread = {0, 0};
+static bool g_lib_ranges_inited = false;
+
+// Unified dl_iterate_phdr callback context
+struct UnifiedCtx {
+    void* fbase;           // For range_for_fbase functionality
+    Range* out;            // For range_for_fbase functionality
+    const void** main_phdr; // For getMainPhdr functionality
+    void* libc_fbase;      // For init_lib_ranges_once functionality
+    void* pthread_fbase;   // For init_lib_ranges_once functionality
+    Range* libc_range;     // For init_lib_ranges_once functionality
+    Range* pthread_range;  // For init_lib_ranges_once functionality
+};
+
+// Unified callback for both range computation and main phdr collection
+static int unified_phdr_cb(dl_phdr_info* info, size_t /*unused*/, void* data) {
+    UnifiedCtx* ctx = (UnifiedCtx*)data;
+
+    // Main executable's program header (first entry)
+    if (ctx->main_phdr != NULL && *ctx->main_phdr == NULL) {
+        *ctx->main_phdr = info->dlpi_phdr;
+    }
+
+    // Range computation for specific fbase (range_for_fbase functionality)
+    if (ctx->fbase != NULL && (void*)info->dlpi_addr == ctx->fbase) {
+        uintptr_t minv = (uintptr_t)-1;
+        uintptr_t maxv = 0;
+        for (int i = 0; i < info->dlpi_phnum; i++) {
+            const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+            if (ph->p_type != PT_LOAD) continue;
+            uintptr_t vaddr = (uintptr_t)info->dlpi_addr + ph->p_vaddr;
+            uintptr_t vend = vaddr + ph->p_memsz;
+            if (vaddr < minv) minv = vaddr;
+            if (vend > maxv) maxv = vend;
+        }
+        if (minv != (uintptr_t)-1 && maxv > minv) {
+            ctx->out->start = minv;
+            ctx->out->end = maxv;
+        }
+    }
+
+    // Library range computation (init_lib_ranges_once functionality)
+    if (ctx->libc_fbase != NULL && (void*)info->dlpi_addr == ctx->libc_fbase) {
+        uintptr_t minv = (uintptr_t)-1;
+        uintptr_t maxv = 0;
+        for (int i = 0; i < info->dlpi_phnum; i++) {
+            const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+            if (ph->p_type != PT_LOAD) continue;
+            uintptr_t vaddr = (uintptr_t)info->dlpi_addr + ph->p_vaddr;
+            uintptr_t vend = vaddr + ph->p_memsz;
+            if (vaddr < minv) minv = vaddr;
+            if (vend > maxv) maxv = vend;
+        }
+        if (minv != (uintptr_t)-1 && maxv > minv) {
+            ctx->libc_range->start = minv;
+            ctx->libc_range->end = maxv;
+        }
+    }
+
+    if (ctx->pthread_fbase != NULL && (void*)info->dlpi_addr == ctx->pthread_fbase) {
+        uintptr_t minv = (uintptr_t)-1;
+        uintptr_t maxv = 0;
+        for (int i = 0; i < info->dlpi_phnum; i++) {
+            const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+            if (ph->p_type != PT_LOAD) continue;
+            uintptr_t vaddr = (uintptr_t)info->dlpi_addr + ph->p_vaddr;
+            uintptr_t vend = vaddr + ph->p_memsz;
+            if (vaddr < minv) minv = vaddr;
+            if (vend > maxv) maxv = vend;
+        }
+        if (minv != (uintptr_t)-1 && maxv > minv) {
+            ctx->pthread_range->start = minv;
+            ctx->pthread_range->end = maxv;
+        }
+    }
+
+    return 0; // continue iteration
+}
+
+// Main program header - initialized lazily
+static const void* _main_phdr = NULL;
+static pthread_once_t _main_phdr_once = PTHREAD_ONCE_INIT;
+static const char* _ld_base = (const char*)getauxval(AT_BASE);
+
+// Initialize main phdr once
+static void init_main_phdr_once() {
+    UnifiedCtx ctx = {NULL, NULL, &_main_phdr, NULL, NULL, NULL, NULL};
+    dl_iterate_phdr(&unified_phdr_cb, &ctx);
+}
+
+// Ensure main phdr is initialized
+static void ensure_main_phdr_initialized() {
+    pthread_once(&_main_phdr_once, init_main_phdr_once);
+}
+
+static Range range_for_fbase(void* fbase) {
+    Range r = {0, 0};
+    if (!fbase) return r;
+    UnifiedCtx ctx = {fbase, &r, NULL, NULL, NULL, NULL, NULL};
+    dl_iterate_phdr(&unified_phdr_cb, &ctx);
+    return r;
+}
+
+static void init_lib_ranges_once() {
+    if (g_lib_ranges_inited) return;
+    g_lib_ranges_inited = true;
+
+    // libc anchor: prefer gnu_get_libc_version if present; fallback to strlen
+    void* libc_sym = dlsym(RTLD_DEFAULT, "gnu_get_libc_version");
+    if (!libc_sym) libc_sym = (void*)&strlen;
+
+    Dl_info di = {0};
+    void* libc_fbase = NULL;
+    if (dladdr(libc_sym, &di) && di.dli_fbase) {
+        libc_fbase = di.dli_fbase;
+    }
+
+    // pthread anchor: pthread_create (on glibc >= 2.34 this lives in libc)
+    Dl_info di2 = {0};
+    void* pthread_fbase = NULL;
+    if (dladdr((void*)&pthread_create, &di2) && di2.dli_fbase) {
+        pthread_fbase = di2.dli_fbase;
+    }
+
+    // Use unified dl_iterate_phdr call to get all information at once
+    UnifiedCtx ctx = {NULL, NULL, &_main_phdr, libc_fbase, pthread_fbase, &g_libc, &g_libpthread};
+    dl_iterate_phdr(&unified_phdr_cb, &ctx);
+
+    // If pthread couldn't be resolved separately, treat it as libc
+    if (!range_valid(&g_libpthread)) g_libpthread = g_libc;
+}
+
+static bool pc_in_range(uintptr_t pc, const Range* r) {
+    return range_valid(r) && pc >= r->start && pc < r->end;
+}
 
 #ifdef __x86_64__
 
@@ -67,19 +214,9 @@ static void applyPatch(CodeCache* cc) {}
 
 #endif
 
-static const void* getMainPhdr() {
-    void* main_phdr = NULL;
-    dl_iterate_phdr([](struct dl_phdr_info* info, size_t size, void* data) {
-        *(const void**)data = info->dlpi_phdr;
-        return 1;
-    }, &main_phdr);
-    return main_phdr;
-}
-
-static const void* _main_phdr = getMainPhdr();
-static const char* _ld_base = (const char*)getauxval(AT_BASE);
 
 static bool isMainExecutable(const char* image_base, const void* map_end) {
+    ensure_main_phdr_initialized();
     return _main_phdr != NULL && _main_phdr >= image_base && _main_phdr < map_end;
 }
 
@@ -879,5 +1016,14 @@ UnloadProtection::~UnloadProtection() {
         dlclose(_lib_handle);
     }
 }
+
+bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
+    init_lib_ranges_once();
+    // Fast, allocation-free integer checks — no strings involved.
+    if (pc_in_range(pc, &g_libc)) return true;
+    if (pc_in_range(pc, &g_libpthread)) return true;
+    return false;
+}
+
 
 #endif // __linux__
