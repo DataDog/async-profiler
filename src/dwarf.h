@@ -133,7 +133,7 @@ class DwarfParser {
             result |= (b & 0x7f) << shift;
             if ((b & 0x80) == 0) {
                 if ((b & 0x40) != 0 && (shift += 7) < 32) {
-                    result |= -1 << shift;
+                    result |= ~0u << shift;
                 }
                 return result;
             }
