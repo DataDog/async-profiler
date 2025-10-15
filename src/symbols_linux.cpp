@@ -345,6 +345,10 @@ void ElfParser::parseProgramHeaders(CodeCache* cc, const char* base, const char*
 
 void ElfParser::calcVirtualLoadAddress() {
     // Find a difference between the virtual load address (often zero) and the actual DSO base
+    if (_base == NULL) {
+        _vaddr_diff = NULL;
+        return;
+    }
     const char* pheaders = (const char*)_header + _header->e_phoff;
     for (int i = 0; i < _header->e_phnum; i++) {
         ElfProgramHeader* pheader = (ElfProgramHeader*)(pheaders + i * _header->e_phentsize);
