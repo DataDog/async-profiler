@@ -383,7 +383,7 @@ class ElfParser {
         if (_header->e_type == ET_EXEC) {
             return (const char*)pheader->p_vaddr;
         }
-        return _vaddr_diff == NULL ? NULL : _vaddr_diff + pheader->p_vaddr;
+        return _vaddr_diff == NULL ? (const char*)pheader->p_vaddr : _vaddr_diff + pheader->p_vaddr;
     }
 
     const char* base() {
@@ -393,8 +393,8 @@ class ElfParser {
     char* dyn_ptr(ElfDyn* dyn) {
         // GNU dynamic linker relocates pointers in the dynamic section, while musl doesn't.
         // Also, [vdso] is not relocated, and its vaddr may differ from the load address.
-        if (_relocate_dyn || (char*)dyn->d_un.d_ptr < _base) {
-            return _vaddr_diff == NULL ? NULL : (char*)_vaddr_diff + dyn->d_un.d_ptr;
+        if (_relocate_dyn || (_base != NULL && (char*)dyn->d_un.d_ptr < _base)) {
+            return _vaddr_diff == NULL ? (char*)dyn->d_un.d_ptr : (char*)_vaddr_diff + dyn->d_un.d_ptr;
         } else {
             return (char*)dyn->d_un.d_ptr;
         }
