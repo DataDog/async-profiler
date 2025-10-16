@@ -640,15 +640,13 @@ bool ElfParser::loadSymbolsUsingDebugLink() {
 
 void ElfParser::loadSymbolTable(const char* symbols, size_t total_size, size_t ent_size, const char* strings) {
     const char* base = this->base();
-    if (base == NULL) {
-        return;
-    }
     for (const char* symbols_end = symbols + total_size; symbols < symbols_end; symbols += ent_size) {
         ElfSymbol* sym = (ElfSymbol*)symbols;
         if (sym->st_name != 0 && sym->st_value != 0) {
             // Skip special AArch64 mapping symbols: $x and $d
             if (sym->st_size != 0 || sym->st_info != 0 || strings[sym->st_name] != '$') {
-                _cc->add(base + sym->st_value, (int)sym->st_size, strings + sym->st_name);
+                const char* addr = base != NULL ? base + sym->st_value : (const char*)sym->st_value;
+                _cc->add(addr, (int)sym->st_size, strings + sym->st_name);
             }
         }
     }
