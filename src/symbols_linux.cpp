@@ -777,6 +777,9 @@ bool ElfParser::loadSymbolsUsingDebugLink() {
 
 void ElfParser::loadSymbolTable(const char* symbols, size_t total_size, size_t ent_size, const char* strings) {
     const char* base = this->base();
+    if (base == NULL) {
+        return;
+    }
     for (const char* symbols_end = symbols + total_size; symbols < symbols_end; symbols += ent_size) {
         ElfSymbol* sym = (ElfSymbol*)symbols;
         if (sym->st_name != 0 && sym->st_value != 0) {
