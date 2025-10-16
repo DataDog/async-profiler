@@ -42,19 +42,19 @@ void* SafeAccess::load(void** ptr, void* default_value) {
 }
 
 NOINLINE
-int32_t SafeAccess::load32(int32_t* ptr, int32_t default_value) {
+u32 SafeAccess::load32(u32* ptr, u32 default_value) {
 #if defined(__x86_64__)
-    int32_t ret;
+    u32 ret;
     asm volatile("movl (%1), %0" : "=a"(ret) : "r"(ptr), "S"(default_value));
 #elif defined(__i386__)
-    int32_t ret;
+    u32 ret;
     asm volatile("movl (%1), %0" : "=a"(ret) : "r"(ptr), "a"(default_value));
 #elif defined(__aarch64__)
-    register int32_t ret asm("w0");
+    register u32 ret asm("w0");
     asm volatile("ldr %w0, [%1]" : "=r"(ret) : "r"(ptr), "r"(default_value));
 #else
     asm volatile("" : : "r"(default_value));  // prevent compiler from optimizing the argument away
-    int32_t ret = *ptr;
+    u32 ret = *ptr;
 #endif
     LABEL(load32_end);
     return ret;
