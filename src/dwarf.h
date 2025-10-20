@@ -7,6 +7,7 @@
 #define _DWARF_H
 
 #include <stddef.h>
+#include <string.h>
 #include "arch.h"
 
 
@@ -108,11 +109,17 @@ class DwarfParser {
     }
 
     u16 get16() {
-        return *(u16*)add(2);
+        const char* ptr = add(2);
+        u16 result;
+        memcpy(&result, ptr, sizeof(u16));
+        return result;
     }
 
     u32 get32() {
-        return *(u32*)add(4);
+        const char* ptr = add(4);
+        u32 result;
+        memcpy(&result, ptr, sizeof(u32));
+        return result;
     }
 
     u32 getLeb() {
@@ -133,7 +140,7 @@ class DwarfParser {
             result |= (b & 0x7f) << shift;
             if ((b & 0x80) == 0) {
                 if ((b & 0x40) != 0 && (shift += 7) < 32) {
-                    result |= -1 << shift;
+                    result |= ~0U << shift;
                 }
                 return result;
             }
@@ -146,7 +153,10 @@ class DwarfParser {
 
     const char* getPtr() {
         const char* ptr = _ptr;
-        return ptr + *(int*)add(4);
+        const char* offset_ptr = add(4);
+        int offset;
+        memcpy(&offset, offset_ptr, sizeof(int));
+        return ptr + offset;
     }
 
     void parse(const char* eh_frame_hdr);

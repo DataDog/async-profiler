@@ -380,7 +380,10 @@ class ElfParser {
     }
 
     const char* at(ElfProgramHeader* pheader) {
-        return _header->e_type == ET_EXEC ? (const char*)pheader->p_vaddr : _vaddr_diff + pheader->p_vaddr;
+        if (_header->e_type == ET_EXEC) {
+            return (const char*)pheader->p_vaddr;
+        }
+        return _vaddr_diff == NULL ? (const char*)pheader->p_vaddr : _vaddr_diff + pheader->p_vaddr;
     }
 
     const char* base() {
@@ -390,8 +393,8 @@ class ElfParser {
     char* dyn_ptr(ElfDyn* dyn) {
         // GNU dynamic linker relocates pointers in the dynamic section, while musl doesn't.
         // Also, [vdso] is not relocated, and its vaddr may differ from the load address.
-        if (_relocate_dyn || (char*)dyn->d_un.d_ptr < _base) {
-            return (char*)_vaddr_diff + dyn->d_un.d_ptr;
+        if (_relocate_dyn || (_base != NULL && (char*)dyn->d_un.d_ptr < _base)) {
+            return _vaddr_diff == NULL ? (char*)dyn->d_un.d_ptr : (char*)_vaddr_diff + dyn->d_un.d_ptr;
         } else {
             return (char*)dyn->d_un.d_ptr;
         }
@@ -482,6 +485,10 @@ void ElfParser::parseProgramHeaders(CodeCache* cc, const char* base, const char*
 
 void ElfParser::calcVirtualLoadAddress() {
     // Find a difference between the virtual load address (often zero) and the actual DSO base
+    if (_base == NULL) {
+        _vaddr_diff = NULL;
+        return;
+    }
     const char* pheaders = (const char*)_header + _header->e_phoff;
     for (int i = 0; i < _header->e_phnum; i++) {
         ElfProgramHeader* pheader = (ElfProgramHeader*)(pheaders + i * _header->e_phentsize);
@@ -775,7 +782,8 @@ void ElfParser::loadSymbolTable(const char* symbols, size_t total_size, size_t e
         if (sym->st_name != 0 && sym->st_value != 0) {
             // Skip special AArch64 mapping symbols: $x and $d
             if (sym->st_size != 0 || sym->st_info != 0 || strings[sym->st_name] != '$') {
-                _cc->add(base + sym->st_value, (int)sym->st_size, strings + sym->st_name);
+                const char* addr = base != NULL ? base + sym->st_value : (const char*)sym->st_value;
+                _cc->add(addr, (int)sym->st_size, strings + sym->st_name);
             }
         }
     }

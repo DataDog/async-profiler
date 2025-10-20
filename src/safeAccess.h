@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include "arch.h"
 
-
 #ifdef __clang__
 #  define NOINLINE __attribute__((noinline))
 #else
