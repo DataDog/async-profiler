@@ -34,11 +34,23 @@ class MachOParser {
     const char* _vmaddr_slide;
 
     static const char* add(const void* base, uint64_t offset) {
-        return (const char*)base + offset;
+        // Check for potential pointer overflow
+        uintptr_t base_addr = (uintptr_t)base;
+        uintptr_t result_addr = base_addr + offset;
+
+        // Return NULL if overflow would occur
+        if (result_addr < base_addr || result_addr < offset) {
+            return NULL;
+        }
+
+        return (const char*)result_addr;
     }
 
     void findSymbolPtrSection(const segment_command_64* sc, const section_64** section_ptr) {
         const section_64* section = (const section_64*)add(sc, sizeof(segment_command_64));
+        if (section == NULL) {
+            return; // Skip if pointer arithmetic would overflow
+        }
         for (uint32_t i = 0; i < sc->nsects; i++) {
             uint32_t section_type = section->flags & SECTION_TYPE;
             if (section_type == S_NON_LAZY_SYMBOL_POINTERS) {
@@ -53,6 +65,12 @@ class MachOParser {
     void loadSymbols(const symtab_command* symtab, const char* link_base) {
         const nlist_64* sym = (const nlist_64*)add(link_base, symtab->symoff);
         const char* str_table = add(link_base, symtab->stroff);
+
+        // Skip if pointer arithmetic would overflow
+        if (sym == NULL || str_table == NULL) {
+            return;
+        }
+
         bool debug_symbols = false;
 
         for (uint32_t i = 0; i < symtab->nsyms; i++) {
@@ -73,8 +91,14 @@ class MachOParser {
                      const section_64* symbol_ptr_section, const char* link_base) {
         const nlist_64* sym = (const nlist_64*)add(link_base, symtab->symoff);
         const char* str_table = add(link_base, symtab->stroff);
+        const uint32_t* isym_base = (const uint32_t*)add(link_base, dysymtab->indirectsymoff);
 
-        const uint32_t* isym = (const uint32_t*)add(link_base, dysymtab->indirectsymoff) + symbol_ptr_section->reserved1;
+        // Skip if pointer arithmetic would overflow
+        if (sym == NULL || str_table == NULL || isym_base == NULL) {
+            return;
+        }
+
+        const uint32_t* isym = isym_base + symbol_ptr_section->reserved1;
         uint32_t isym_count = symbol_ptr_section->size / sizeof(void*);
         void** slot = (void**)(_vmaddr_slide + symbol_ptr_section->addr);
 
@@ -108,7 +132,10 @@ class MachOParser {
             if (lc->cmd == LC_SEGMENT_64) {
                 const segment_command_64* sc = (const segment_command_64*)lc;
                 if (strcmp(sc->segname, "__TEXT") == 0) {
-                    _cc->updateBounds(_image_base, add(_image_base, sc->vmsize));
+                    const char* bounds_end = add(_image_base, sc->vmsize);
+                    if (bounds_end != NULL) {
+                        _cc->updateBounds(_image_base, bounds_end);
+                    }
                 } else if (strcmp(sc->segname, "__LINKEDIT") == 0) {
                     link_base = _vmaddr_slide + sc->vmaddr - sc->fileoff;
                 } else if (strcmp(sc->segname, "__DATA") == 0 || strcmp(sc->segname, "__DATA_CONST") == 0) {
@@ -119,7 +146,13 @@ class MachOParser {
             } else if (lc->cmd == LC_DYSYMTAB) {
                 dysymtab = (const dysymtab_command*)lc;
             }
-            lc = (const load_command*)add(lc, lc->cmdsize);
+
+            // Advance to next load command, checking for overflow
+            const load_command* next_lc = (const load_command*)add(lc, lc->cmdsize);
+            if (next_lc == NULL) {
+                break; // Stop if pointer arithmetic would overflow
+            }
+            lc = next_lc;
         }
 
         if (symtab != NULL && link_base != NULL) {

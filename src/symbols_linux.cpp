@@ -475,7 +475,21 @@ bool ElfParser::parseFile(CodeCache* cc, const char* base, const char* file_name
 
 void ElfParser::parseProgramHeaders(CodeCache* cc, const char* base, const char* end, bool relocate_dyn) {
     ElfParser elf(cc, base, base, NULL, relocate_dyn);
-    if (elf.validHeader() && base + elf._header->e_phoff < end) {
+
+    // Check for potential pointer overflow in program header offset
+    bool valid_phoff = true;
+    if (elf.validHeader()) {
+        uintptr_t base_addr = (uintptr_t)base;
+        uintptr_t phoff_value = (uintptr_t)elf._header->e_phoff;
+        uintptr_t result_addr = base_addr + phoff_value;
+
+        // Check for overflow and bounds
+        if (result_addr < base_addr || result_addr < phoff_value || (const char*)result_addr >= end) {
+            valid_phoff = false;
+        }
+    }
+
+    if (elf.validHeader() && valid_phoff) {
         cc->setTextBase(base);
         elf.calcVirtualLoadAddress();
         elf.parseDynamicSection();
@@ -575,7 +589,20 @@ void ElfParser::parseDynamicSection() {
                 ElfRelocation* r = (ElfRelocation*)(jmprel + offs);
                 ElfSymbol* sym = (ElfSymbol*)(symtab + ELF_R_SYM(r->r_info) * syment);
                 if (sym->st_name != 0) {
-                    _cc->addImport((void**)(base + r->r_offset), strtab + sym->st_name);
+                    // Check for potential pointer overflow in relocation offset
+                    if (base != NULL) {
+                        uintptr_t base_addr = (uintptr_t)base;
+                        uintptr_t offset_value = (uintptr_t)r->r_offset;
+                        uintptr_t result_addr = base_addr + offset_value;
+
+                        // Skip relocations that would cause overflow
+                        if (result_addr < base_addr || result_addr < offset_value) {
+                            continue;
+                        }
+                        _cc->addImport((void**)result_addr, strtab + sym->st_name);
+                    } else {
+                        _cc->addImport((void**)r->r_offset, strtab + sym->st_name);
+                    }
                 }
             }
         }
@@ -589,7 +616,20 @@ void ElfParser::parseDynamicSection() {
                 if (ELF_R_TYPE(r->r_info) == R_GLOB_DAT || ELF_R_TYPE(r->r_info) == R_ABS64) {
                     ElfSymbol* sym = (ElfSymbol*)(symtab + ELF_R_SYM(r->r_info) * syment);
                     if (sym->st_name != 0) {
-                        _cc->addImport((void**)(base + r->r_offset), strtab + sym->st_name);
+                        // Check for potential pointer overflow in relocation offset
+                        if (base != NULL) {
+                            uintptr_t base_addr = (uintptr_t)base;
+                            uintptr_t offset_value = (uintptr_t)r->r_offset;
+                            uintptr_t result_addr = base_addr + offset_value;
+
+                            // Skip relocations that would cause overflow
+                            if (result_addr < base_addr || result_addr < offset_value) {
+                                continue;
+                            }
+                            _cc->addImport((void**)result_addr, strtab + sym->st_name);
+                        } else {
+                            _cc->addImport((void**)r->r_offset, strtab + sym->st_name);
+                        }
                     }
                 }
             }
@@ -782,7 +822,21 @@ void ElfParser::loadSymbolTable(const char* symbols, size_t total_size, size_t e
         if (sym->st_name != 0 && sym->st_value != 0) {
             // Skip special AArch64 mapping symbols: $x and $d
             if (sym->st_size != 0 || sym->st_info != 0 || strings[sym->st_name] != '$') {
-                const char* addr = base != NULL ? base + sym->st_value : (const char*)sym->st_value;
+                const char* addr;
+                if (base != NULL) {
+                    // Check for potential pointer overflow
+                    uintptr_t base_addr = (uintptr_t)base;
+                    uintptr_t symbol_value = (uintptr_t)sym->st_value;
+                    uintptr_t result_addr = base_addr + symbol_value;
+
+                    // Skip symbols that would cause overflow or result in invalid addresses
+                    if (result_addr < base_addr || result_addr < symbol_value) {
+                        continue;
+                    }
+                    addr = (const char*)result_addr;
+                } else {
+                    addr = (const char*)sym->st_value;
+                }
                 _cc->add(addr, (int)sym->st_size, strings + sym->st_name);
             }
         }
