@@ -183,6 +183,10 @@ void Symbols::parseLibraries(CodeCacheArray* array, bool kernel_symbols) {
     }
 }
 
+void Symbols::initLibraryRanges() {
+    // No initialization needed on macOS
+}
+
 bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
     return false;
 }
