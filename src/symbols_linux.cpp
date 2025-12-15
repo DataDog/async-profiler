@@ -1025,9 +1025,13 @@ UnloadProtection::~UnloadProtection() {
     }
 }
 
-bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
+void Symbols::initLibraryRanges() {
     init_lib_ranges_once();
+}
+
+bool Symbols::isLibcOrPthreadAddress(uintptr_t pc) {
     // Fast, allocation-free integer checks — no strings involved.
+    // initLibraryRanges() must have been called during profiler startup.
     if (pc_in_range(pc, &g_libc)) return true;
     if (pc_in_range(pc, &g_libpthread)) return true;
     return false;

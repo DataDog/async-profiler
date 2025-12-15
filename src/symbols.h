@@ -19,6 +19,7 @@ class Symbols {
     static bool _libs_limit_reported;
 
   public:
+    static void initLibraryRanges();
     static void parseKernelSymbols(CodeCache* cc);
     static void parseLibraries(CodeCacheArray* array, bool kernel_symbols);
 

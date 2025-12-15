@@ -18,6 +18,7 @@
 #include "instrument.h"
 #include "lockTracer.h"
 #include "log.h"
+#include "symbols.h"
 #include "vmStructs.h"
 
 
@@ -140,6 +141,9 @@ bool VM::init(JavaVM* vm, bool attach) {
     if (_vm->GetEnv((void**)&_jvmti, JVMTI_VERSION_1_0) != 0) {
         return false;
     }
+
+    // Initialize library ranges before any signal handlers can be installed
+    Symbols::initLibraryRanges();
 
     bool is_hotspot = false;
     bool is_zero_vm = false;
