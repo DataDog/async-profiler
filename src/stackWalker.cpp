@@ -15,20 +15,14 @@
 
 const uintptr_t SAME_STACK_DISTANCE = 8192;
 const uintptr_t MAX_WALK_SIZE = 0x100000;
-const intptr_t MAX_FRAME_SIZE = 0x40000;
 const intptr_t MAX_INTERPRETER_FRAME_SIZE = 0x1000;
-const intptr_t DEAD_ZONE = 0x1000;
 
 static ucontext_t empty_ucontext{};
 
-
-static inline bool aligned(uintptr_t ptr) {
-    return (ptr & (sizeof(uintptr_t) - 1)) == 0;
-}
-
-static inline bool inDeadZone(const void* ptr) {
-    return ptr < (const void*)DEAD_ZONE || ptr > (const void*)-DEAD_ZONE;
-}
+// Use validation helpers from header (shared with tests)
+using StackWalkValidation::inDeadZone;
+using StackWalkValidation::aligned;
+using StackWalkValidation::MAX_FRAME_SIZE;
 
 static inline bool sameStack(void* hi, void* lo) {
     return (uintptr_t)hi - (uintptr_t)lo < SAME_STACK_DISTANCE;
@@ -145,10 +139,10 @@ int StackWalker::walkDwarf(void* ucontext, const void** callchain, int max_depth
 
         uintptr_t prev_sp = sp;
         CodeCache* cc = profiler->findLibraryByAddress(pc);
-        FrameDesc* f = cc != NULL ? cc->findFrameDesc(pc) : &FrameDesc::default_frame;
+        FrameDesc f = cc != NULL ? cc->findFrameDesc(pc) : FrameDesc::default_frame;
 
-        u8 cfa_reg = (u8)f->cfa;
-        int cfa_off = f->cfa >> 8;
+        u8 cfa_reg = (u8)f.cfa;
+        int cfa_off = f.cfa >> 8;
         if (cfa_reg == DW_REG_SP) {
             sp = sp + cfa_off;
         } else if (cfa_reg == DW_REG_FP) {
@@ -169,23 +163,23 @@ int StackWalker::walkDwarf(void* ucontext, const void** callchain, int max_depth
             break;
         }
 
-        const void* prev_pc = pc; 
-        if (f->fp_off & DW_PC_OFFSET) {
-            pc = (const char*)pc + (f->fp_off >> 1);
+        const void* prev_pc = pc;
+        if (f.fp_off & DW_PC_OFFSET) {
+            pc = (const char*)pc + (f.fp_off >> 1);
         } else {
-            if (f->fp_off != DW_SAME_FP && f->fp_off < MAX_FRAME_SIZE && f->fp_off > -MAX_FRAME_SIZE) {
-                fp = (uintptr_t)SafeAccess::load((void**)(sp + f->fp_off));
+            if (f.fp_off != DW_SAME_FP && f.fp_off < MAX_FRAME_SIZE && f.fp_off > -MAX_FRAME_SIZE) {
+                fp = (uintptr_t)SafeAccess::load((void**)(sp + f.fp_off));
             }
 
-            if (EMPTY_FRAME_SIZE > 0 || f->pc_off != DW_LINK_REGISTER) {
-                pc = stripPointer(SafeAccess::load((void**)(sp + f->pc_off)));
+            if (EMPTY_FRAME_SIZE > 0 || f.pc_off != DW_LINK_REGISTER) {
+                pc = stripPointer(SafeAccess::load((void**)(sp + f.pc_off)));
             } else if (depth == 1) {
                 pc = (const void*)frame.link();
             } else {
                 break;
             }
 
-            if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f->fp_off != DW_SAME_FP) {
+            if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f.fp_off != DW_SAME_FP) {
                 // AArch64 default_frame
                 sp = defaultSenderSP(sp, fp);
                 if (sp < prev_sp || sp >= bottom || !aligned(sp)) {
@@ -265,6 +259,23 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Walk until the bottom of the stack or until the first Java frame
     while (depth < max_depth) {
         if (CodeHeap::contains(pc)) {
+            // If we're in JVM-generated code but don't have a VMThread, we cannot safely
+            // walk the Java stack because crash protection is not set up.
+            //
+            // This can occur during JNI attach/detach transitions: when a thread detaches,
+            // pthread_setspecific() clears the VMThread TLS, but if a profiling signal arrives
+            // while PC is still in JVM stubs (JavaCalls, method entry/exit), we see CodeHeap
+            // code without VMThread context.
+            //
+            // Without vm_thread, crash protection via setjmp/longjmp cannot work
+            // (checkFault() needs vm_thread->exception() to longjmp). Any memory dereference in interpreter
+            // frame handling or NMethod validation would crash the process with unrecoverable SEGV.
+            //
+            // The missing VMThread is a timing issue during thread lifecycle.
+            if (vm_thread == NULL) {
+                fillFrame(frames[depth++], BCI_ERROR, "break_no_vmthread");
+                break;
+            }
             prev_native_pc = NULL; // we are in JVM code, no previous 'native' PC
             NMethod* nm = CodeHeap::findNMethod(pc);
             if (nm == NULL) {
@@ -439,10 +450,10 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
 
         uintptr_t prev_sp = sp;
         CodeCache* cc = profiler->findLibraryByAddress(pc);
-        FrameDesc* f = cc != NULL ? cc->findFrameDesc(pc) : &FrameDesc::default_frame;
+        FrameDesc f = cc != NULL ? cc->findFrameDesc(pc) : FrameDesc::default_frame;
 
-        u8 cfa_reg = (u8)f->cfa;
-        int cfa_off = f->cfa >> 8;
+        u8 cfa_reg = (u8)f.cfa;
+        int cfa_off = f.cfa >> 8;
         if (cfa_reg == DW_REG_SP) {
             sp = sp + cfa_off;
         } else if (cfa_reg == DW_REG_FP) {
@@ -465,22 +476,22 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
 
         // store the previous pc before unwinding
         prev_native_pc = pc;
-        if (f->fp_off & DW_PC_OFFSET) {
-            pc = (const char*)pc + (f->fp_off >> 1);
+        if (f.fp_off & DW_PC_OFFSET) {
+            pc = (const char*)pc + (f.fp_off >> 1);
         } else {
-            if (f->fp_off != DW_SAME_FP && f->fp_off < MAX_FRAME_SIZE && f->fp_off > -MAX_FRAME_SIZE) {
-                fp = *(uintptr_t*)(sp + f->fp_off);
+            if (f.fp_off != DW_SAME_FP && f.fp_off < MAX_FRAME_SIZE && f.fp_off > -MAX_FRAME_SIZE) {
+                fp = (uintptr_t)SafeAccess::load((void**)(sp + f.fp_off));
             }
 
-            if (EMPTY_FRAME_SIZE > 0 || f->pc_off != DW_LINK_REGISTER) {
-                pc = stripPointer(*(void**)(sp + f->pc_off));
+            if (EMPTY_FRAME_SIZE > 0 || f.pc_off != DW_LINK_REGISTER) {
+                pc = stripPointer(SafeAccess::load((void**)(sp + f.pc_off)));
             } else if (depth == 1) {
                 pc = (const void*)frame.link();
             } else {
                 break;
             }
 
-            if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f->fp_off != DW_SAME_FP) {
+            if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f.fp_off != DW_SAME_FP) {
                 // AArch64 default_frame
                 sp = defaultSenderSP(sp, fp);
                 if (sp < prev_sp || sp >= bottom || !aligned(sp)) {

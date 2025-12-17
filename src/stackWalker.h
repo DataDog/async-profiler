@@ -32,6 +32,22 @@ enum StackDetail {
     VM_EXPERT   // all features: frame types, runtime stubs, and intermediate native frames
 };
 
+// Stack walking validation helpers (used by implementation and tests)
+namespace StackWalkValidation {
+    const uintptr_t DEAD_ZONE = 0x1000;
+    const intptr_t MAX_FRAME_SIZE = 0x40000;
+
+    // Check if pointer is in dead zone (very low or very high address)
+    static inline bool inDeadZone(const void* ptr) {
+        return ptr < (const void*)DEAD_ZONE || ptr > (const void*)-DEAD_ZONE;
+    }
+
+    // Check if pointer is properly aligned
+    static inline bool aligned(uintptr_t ptr) {
+        return (ptr & (sizeof(uintptr_t) - 1)) == 0;
+    }
+}
+
 class StackWalker {
   private:
     static int walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
