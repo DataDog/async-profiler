@@ -33,6 +33,11 @@ class SafeAccess {
         return *ptr;
     }
 
+    NOINLINE __attribute__((aligned(16)))
+    static int loadInt(int* ptr, int default_value) {
+        return *ptr;
+    }
+
     static uintptr_t skipLoad(uintptr_t pc) {
         if ((pc - (uintptr_t)load) < 16) {
 #if defined(__x86_64__)
@@ -51,7 +56,7 @@ class SafeAccess {
     }
 
     static uintptr_t skipLoadArg(uintptr_t pc) {
-        if ((pc - (uintptr_t)load32) < 16 || (pc - (uintptr_t)loadPtr) < 16) {
+        if ((pc - (uintptr_t)load32) < 16 || (pc - (uintptr_t)loadPtr) < 16 || (pc - (uintptr_t)loadInt) < 16) {
 #if defined(__x86_64__) || defined(__i386__)
             if (*(u8*)pc == 0x8b) return 2;      // mov eax, [reg]
             if (*(u16*)pc == 0x8b48) return 3;   // mov rax, [reg]

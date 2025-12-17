@@ -204,7 +204,7 @@ class CodeCache {
     const void* findSymbolByPrefix(const char* prefix, int prefix_len);
 
     void setDwarfTable(FrameDesc* table, int length);
-    FrameDesc* findFrameDesc(const void* pc);
+    FrameDesc findFrameDesc(const void* pc);
 
     size_t usedMemory();
 

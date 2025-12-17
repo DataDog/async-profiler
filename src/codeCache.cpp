@@ -11,6 +11,7 @@
 #include "dwarf.h"
 #include "log.h"
 #include "os.h"
+#include "safeAccess.h"
 
 
 char* NativeFunc::create(const char* name, short lib_index) {
@@ -136,19 +137,25 @@ const char* CodeCache::binarySearch(const void* address) {
 
     while (low <= high) {
         int mid = (unsigned int)(low + high) >> 1;
-        if (_blobs[mid]._end <= address) {
+        const void* mid_end = SafeAccess::loadPtr((void**)&_blobs[mid]._end, NULL);
+        const void* mid_start = SafeAccess::loadPtr((void**)&_blobs[mid]._start, NULL);
+        if (mid_end <= address) {
             low = mid + 1;
-        } else if (_blobs[mid]._start > address) {
+        } else if (mid_start > address) {
             high = mid - 1;
         } else {
-            return _blobs[mid]._name;
+            return (const char*)SafeAccess::loadPtr((void**)&_blobs[mid]._name, (void*)_name);
         }
     }
 
     // Symbols with zero size can be valid functions: e.g. ASM entry points or kernel code.
     // Also, in some cases (endless loop) the return address may point beyond the function.
-    if (low > 0 && (_blobs[low - 1]._start == _blobs[low - 1]._end || _blobs[low - 1]._end == address)) {
-        return _blobs[low - 1]._name;
+    if (low > 0) {
+        const void* prev_start = SafeAccess::loadPtr((void**)&_blobs[low - 1]._start, NULL);
+        const void* prev_end = SafeAccess::loadPtr((void**)&_blobs[low - 1]._end, NULL);
+        if (prev_start == prev_end || prev_end == address) {
+            return (const char*)SafeAccess::loadPtr((void**)&_blobs[low - 1]._name, (void*)_name);
+        }
     }
     return _name;
 }
@@ -285,28 +292,41 @@ void CodeCache::setDwarfTable(FrameDesc* table, int length) {
     _dwarf_table_length = length;
 }
 
-FrameDesc* CodeCache::findFrameDesc(const void* pc) {
+FrameDesc CodeCache::findFrameDesc(const void* pc) {
     u32 target_loc = (const char*)pc - _text_base;
     int low = 0;
     int high = _dwarf_table_length - 1;
 
     while (low <= high) {
         int mid = (unsigned int)(low + high) >> 1;
-        if (_dwarf_table[mid].loc < target_loc) {
+        u32 mid_loc = SafeAccess::load32(&_dwarf_table[mid].loc, 0);
+        if (mid_loc < target_loc) {
             low = mid + 1;
-        } else if (_dwarf_table[mid].loc > target_loc) {
+        } else if (mid_loc > target_loc) {
             high = mid - 1;
         } else {
-            return &_dwarf_table[mid];
+            // Safely copy the FrameDesc
+            FrameDesc result;
+            result.loc = SafeAccess::load32(&_dwarf_table[mid].loc, 0);
+            result.cfa = SafeAccess::loadInt(&_dwarf_table[mid].cfa, 0);
+            result.fp_off = SafeAccess::loadInt(&_dwarf_table[mid].fp_off, 0);
+            result.pc_off = SafeAccess::loadInt(&_dwarf_table[mid].pc_off, 0);
+            return result;
         }
     }
 
     if (low > 0) {
-        return &_dwarf_table[low - 1];
+        // Safely copy the FrameDesc
+        FrameDesc result;
+        result.loc = SafeAccess::load32(&_dwarf_table[low - 1].loc, 0);
+        result.cfa = SafeAccess::loadInt(&_dwarf_table[low - 1].cfa, 0);
+        result.fp_off = SafeAccess::loadInt(&_dwarf_table[low - 1].fp_off, 0);
+        result.pc_off = SafeAccess::loadInt(&_dwarf_table[low - 1].pc_off, 0);
+        return result;
     } else if (target_loc - _plt_offset < _plt_size) {
-        return &FrameDesc::empty_frame;
+        return FrameDesc::empty_frame;
     } else {
-        return &FrameDesc::default_frame;
+        return FrameDesc::default_frame;
     }
 }
 
