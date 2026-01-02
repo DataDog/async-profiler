@@ -27,13 +27,6 @@ struct StackContext {
     }
 };
 
-// Detail level of VMStructs stack walking
-enum StackDetail {
-    VM_BASIC,   // only basic Java frames similar to what AsyncGetCallTrace provides
-    VM_NORMAL,  // include frame types and runtime stubs
-    VM_EXPERT   // all features: frame types, runtime stubs, and intermediate native frames
-};
-
 // Stack walking validation helpers (used by implementation and tests)
 namespace StackWalkValidation {
     const uintptr_t DEAD_ZONE = 0x1000;

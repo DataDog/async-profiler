@@ -8,6 +8,12 @@
 
 #include <stdint.h>
 
+#ifdef __clang__
+#  define NOINLINE __attribute__((noinline))
+#else
+#  define NOINLINE __attribute__((noinline,noclone))
+#endif
+
 class StackFrame;
 
 class SafeAccess {
@@ -19,9 +25,7 @@ class SafeAccess {
     static int32_t load32(int32_t* ptr, int32_t default_value = 0);
 
     NOINLINE __attribute__((aligned(16)))
-    static int loadInt(int* ptr, int default_value) {
-        return *ptr;
-    }
+    static int loadInt(int* ptr, int default_value = 0);
 
     static bool checkFault(StackFrame& frame);
 };

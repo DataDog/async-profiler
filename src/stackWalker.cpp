@@ -186,14 +186,6 @@ int StackWalker::walkDwarf(void* ucontext, const void** callchain, int max_depth
                 break;
             }
 
-            if (EMPTY_FRAME_SIZE > 0 || f->pc_off != DW_LINK_REGISTER) {
-                pc = stripPointer(SafeAccess::load((void**)(sp + f.pc_off)));
-            } else if (depth == 1) {
-                pc = (const void*)frame.link();
-            } else {
-                break;
-            }
-
             if (EMPTY_FRAME_SIZE == 0 && cfa_off == 0 && f.fp_off != DW_SAME_FP) {
                 // AArch64 default_frame
                 sp = defaultSenderSP(sp, fp);
@@ -276,7 +268,6 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
     // Show extended frame types and stub frames for execution-type events
     bool details = event_type <= MALLOC_SAMPLE || features.mixed;
 
-    JavaFrameAnchor* anchor = NULL;
     if (details && vm_thread != NULL && vm_thread->isJavaThread()) {
         anchor = vm_thread->anchor();
     }
@@ -467,7 +458,7 @@ int StackWalker::walkVM(void* ucontext, ASGCT_CallFrame* frames, int max_depth,
                         fillFrame(frames[depth++], FRAME_JIT_COMPILED, 0, method_id);
                     }
                 }
-            } else if (method_name == NULL && detail < VM_EXPERT) {
+            } else if (method_name == NULL && details) {
                 // These workarounds will minimize the number of unknown frames for 'vm'
                 // We want to keep the 'raw' data in 'vmx', though
                 if (anchor) {

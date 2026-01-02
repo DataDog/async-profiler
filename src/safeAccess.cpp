@@ -6,12 +6,6 @@
 #include "safeAccess.h"
 #include "stackFrame.h"
 
-#ifdef __clang__
-#  define NOINLINE __attribute__((noinline))
-#else
-#  define NOINLINE __attribute__((noinline,noclone))
-#endif
-
 #ifdef __APPLE__
 #  define LABEL(sym) asm volatile(".globl _" #sym "\n_" #sym ":")
 #else
@@ -21,6 +15,7 @@
 
 extern instruction_t load_end[];
 extern instruction_t load32_end[];
+extern instruction_t loadInt_end[];
 
 NOINLINE
 void* SafeAccess::load(void** ptr, void* default_value) {
@@ -60,12 +55,32 @@ int32_t SafeAccess::load32(int32_t* ptr, int32_t default_value) {
     return ret;
 }
 
-// When a memory access error happens in SafeAccess::load/load32,
+NOINLINE
+int SafeAccess::loadInt(int* ptr, int default_value) {
+#if defined(__x86_64__)
+    int ret;
+    asm volatile("movl (%1), %0" : "=a"(ret) : "r"(ptr), "S"(default_value));
+#elif defined(__i386__)
+    int ret;
+    asm volatile("movl (%1), %0" : "=a"(ret) : "r"(ptr), "a"(default_value));
+#elif defined(__aarch64__)
+    register int ret asm("w0");
+    asm volatile("ldr %w0, [%1]" : "=r"(ret) : "r"(ptr), "r"(default_value));
+#else
+    asm volatile("" : : "r"(default_value));  // prevent compiler from optimizing the argument away
+    int ret = *ptr;
+#endif
+    LABEL(loadInt_end);
+    return ret;
+}
+
+// When a memory access error happens in SafeAccess::load/load32/loadInt,
 // this function skips the fault instruction pretending it has loaded default_value
 bool SafeAccess::checkFault(StackFrame& frame) {
     instruction_t* pc = (instruction_t*)frame.pc();
     if (!(pc >= (void*)load && pc < load_end) &&
-        !(pc >= (void*)load32 && pc < load32_end)) {
+        !(pc >= (void*)load32 && pc < load32_end) &&
+        !(pc >= (void*)loadInt && pc < loadInt_end)) {
         return false;
     }
 
