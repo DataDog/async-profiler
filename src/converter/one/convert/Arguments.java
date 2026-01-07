@@ -25,12 +25,14 @@ public class Arguments {
     public boolean reverse;
     public boolean inverted;
     public boolean cpu;
+    public boolean cpuTime;
     public boolean wall;
     public boolean alloc;
     public boolean nativemem;
     public boolean leak;
     public boolean live;
     public boolean lock;
+    public boolean trace;
     public boolean threads;
     public boolean classify;
     public boolean total;
@@ -48,7 +50,7 @@ public class Arguments {
             String arg = args[i];
             String fieldName;
             if (arg.startsWith("--")) {
-                fieldName = arg.substring(2);
+                fieldName = toCamelCase(arg.substring(2));
             } else if (arg.startsWith("-") && arg.length() == 2) {
                 fieldName = alias(arg.charAt(1));
             } else {
@@ -103,6 +105,13 @@ public class Arguments {
             default:
                 return String.valueOf(c);
         }
+    }
+
+    private static String toCamelCase(String name) {
+        for (int i; (i = name.lastIndexOf('-', name.length() - 2)) >= 0; ) {
+            name = name.substring(0, i) + Character.toUpperCase(name.charAt(i + 1)) + name.substring(i + 2);
+        }
+        return name;
     }
 
     // Absolute floating point value or percentage followed by %

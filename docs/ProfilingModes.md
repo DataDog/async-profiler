@@ -189,6 +189,11 @@ of all compiled methods. The subsequent instrumentation flushes only the _depend
 
 The massive CodeCache flush doesn't occur if attaching async-profiler as an agent.
 
+### Latency profiling
+
+Please refer to our blog post on [latency profiling](https://github.com/async-profiler/async-profiler/discussions/1497)
+to know more about this profiling mode.
+
 ## Native function profiling
 
 Here are some useful native functions to profile:

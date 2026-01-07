@@ -60,6 +60,7 @@ public abstract class JfrConverter extends Classifier {
                 : args.live ? LiveObject.class
                 : args.alloc ? AllocationSample.class
                 : args.lock ? ContendedLock.class
+                : args.trace ? MethodTrace.class
                 : ExecutionSample.class;
 
         BitSet threadStates = null;
@@ -72,6 +73,9 @@ public abstract class JfrConverter extends Classifier {
             threadStates = getThreadStates(true);
         } else if (args.wall) {
             threadStates = getThreadStates(false);
+        } else if (args.cpuTime) {
+            threadStates = new BitSet();
+            threadStates.set(ExecutionSample.CPU_TIME_SAMPLE);
         }
 
         long startTicks = args.from != 0 ? toTicks(args.from) : Long.MIN_VALUE;

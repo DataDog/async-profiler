@@ -1,4 +1,4 @@
-PROFILER_VERSION ?= 4.1
+PROFILER_VERSION ?= 4.2.1
 
 ifeq ($(COMMIT_TAG),true)
   PROFILER_VERSION := $(PROFILER_VERSION)-$(shell git rev-parse --short=8 HEAD)
@@ -30,6 +30,8 @@ OBJCOPY ?= objcopy
 ifneq ($(CROSS_COMPILE),)
 CC := $(CROSS_COMPILE)gcc
 CXX := $(CROSS_COMPILE)g++
+AS := $(CROSS_COMPILE)as
+LD := $(CROSS_COMPILE)ld
 STRIP := $(CROSS_COMPILE)strip
 OBJCOPY := $(CROSS_COMPILE)objcopy
 endif
@@ -58,7 +60,8 @@ TEST_GEN_DIR=test/gen
 LOG_DIR=build/test/logs
 LOG_LEVEL=
 SKIP=
-TEST_FLAGS=-DlogDir=$(LOG_DIR) -DlogLevel=$(LOG_LEVEL) -Dskip='$(subst $(COMMA), ,$(SKIP))'
+RETRY_COUNT=0
+TEST_FLAGS=-DlogDir=$(LOG_DIR) -DlogLevel=$(LOG_LEVEL) -Dskip='$(subst $(COMMA), ,$(SKIP))' -DretryCount=$(RETRY_COUNT)
 
 # always sort SOURCES so zInit is last.
 SOURCES := $(sort $(wildcard src/*.cpp))
@@ -92,7 +95,7 @@ ifeq ($(OS),Darwin)
     MERGE=false
   endif
 else
-  CXXFLAGS += -U_FORTIFY_SOURCE -Wl,-z,defs -Wl,--exclude-libs,ALL -static-libstdc++ -static-libgcc -fdata-sections -ffunction-sections -Wl,--gc-sections -ggdb
+  CXXFLAGS += -U_FORTIFY_SOURCE -Wl,-z,defs -Wl,--exclude-libs,ALL -static-libstdc++ -static-libgcc -fdata-sections -ffunction-sections -Wl,--gc-sections -ggdb -Wunused-variable
   ifeq ($(MERGE),true)
     CXXFLAGS += -fwhole-program
   endif
@@ -127,10 +130,6 @@ endif
 STATIC_BINARY=$(findstring musl-gcc,$(CC))
 ifneq (,$(STATIC_BINARY))
   CFLAGS += -static -fdata-sections -ffunction-sections -Wl,--gc-sections
-endif
-
-ifneq (,$(findstring $(ARCH_TAG),x86 x64 arm64))
-  CXXFLAGS += -momit-leaf-frame-pointer
 endif
 
 

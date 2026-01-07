@@ -137,24 +137,24 @@ const char* CodeCache::binarySearch(const void* address) {
 
     while (low <= high) {
         int mid = (unsigned int)(low + high) >> 1;
-        const void* mid_end = SafeAccess::loadPtr((void**)&_blobs[mid]._end, NULL);
-        const void* mid_start = SafeAccess::loadPtr((void**)&_blobs[mid]._start, NULL);
+        const void* mid_end = SafeAccess::load((void**)&_blobs[mid]._end, NULL);
+        const void* mid_start = SafeAccess::load((void**)&_blobs[mid]._start, NULL);
         if (mid_end <= address) {
             low = mid + 1;
         } else if (mid_start > address) {
             high = mid - 1;
         } else {
-            return (const char*)SafeAccess::loadPtr((void**)&_blobs[mid]._name, (void*)_name);
+            return (const char*)SafeAccess::load((void**)&_blobs[mid]._name, (void*)_name);
         }
     }
 
     // Symbols with zero size can be valid functions: e.g. ASM entry points or kernel code.
     // Also, in some cases (endless loop) the return address may point beyond the function.
     if (low > 0) {
-        const void* prev_start = SafeAccess::loadPtr((void**)&_blobs[low - 1]._start, NULL);
-        const void* prev_end = SafeAccess::loadPtr((void**)&_blobs[low - 1]._end, NULL);
+        const void* prev_start = SafeAccess::load((void**)&_blobs[low - 1]._start, NULL);
+        const void* prev_end = SafeAccess::load((void**)&_blobs[low - 1]._end, NULL);
         if (prev_start == prev_end || prev_end == address) {
-            return (const char*)SafeAccess::loadPtr((void**)&_blobs[low - 1]._name, (void*)_name);
+            return (const char*)SafeAccess::load((void**)&_blobs[low - 1]._name, (void*)_name);
         }
     }
     return _name;
@@ -299,7 +299,7 @@ FrameDesc CodeCache::findFrameDesc(const void* pc) {
 
     while (low <= high) {
         int mid = (unsigned int)(low + high) >> 1;
-        u32 mid_loc = SafeAccess::load32(&_dwarf_table[mid].loc, 0);
+        u32 mid_loc = SafeAccess::load32((int32_t*)&_dwarf_table[mid].loc, 0);
         if (mid_loc < target_loc) {
             low = mid + 1;
         } else if (mid_loc > target_loc) {
@@ -307,7 +307,7 @@ FrameDesc CodeCache::findFrameDesc(const void* pc) {
         } else {
             // Safely copy the FrameDesc
             FrameDesc result;
-            result.loc = SafeAccess::load32(&_dwarf_table[mid].loc, 0);
+            result.loc = SafeAccess::load32((int32_t*)&_dwarf_table[mid].loc, 0);
             result.cfa = SafeAccess::loadInt(&_dwarf_table[mid].cfa, 0);
             result.fp_off = SafeAccess::loadInt(&_dwarf_table[mid].fp_off, 0);
             result.pc_off = SafeAccess::loadInt(&_dwarf_table[mid].pc_off, 0);
@@ -318,7 +318,7 @@ FrameDesc CodeCache::findFrameDesc(const void* pc) {
     if (low > 0) {
         // Safely copy the FrameDesc
         FrameDesc result;
-        result.loc = SafeAccess::load32(&_dwarf_table[low - 1].loc, 0);
+        result.loc = SafeAccess::load32((int32_t*)&_dwarf_table[low - 1].loc, 0);
         result.cfa = SafeAccess::loadInt(&_dwarf_table[low - 1].cfa, 0);
         result.fp_off = SafeAccess::loadInt(&_dwarf_table[low - 1].fp_off, 0);
         result.pc_off = SafeAccess::loadInt(&_dwarf_table[low - 1].pc_off, 0);

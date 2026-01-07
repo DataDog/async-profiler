@@ -45,6 +45,7 @@ int VMStructs::_comp_method_offset = -1;
 int VMStructs::_anchor_sp_offset = -1;
 int VMStructs::_anchor_pc_offset = -1;
 int VMStructs::_anchor_fp_offset = -1;
+int VMStructs::_blob_size_offset = -1;
 int VMStructs::_frame_size_offset = -1;
 int VMStructs::_frame_complete_offset = -1;
 int VMStructs::_code_offset = -1;
@@ -112,6 +113,8 @@ jfieldID VMStructs::_eetop;
 jfieldID VMStructs::_tid;
 jfieldID VMStructs::_klass = NULL;
 int VMStructs::_tls_index = -1;
+intptr_t VMStructs::_env_offset = -1;
+void* VMStructs::_java_thread_vtbl[6];
 
 VMStructs::LockFunc VMStructs::_lock_func;
 VMStructs::LockFunc VMStructs::_unlock_func;
@@ -294,7 +297,9 @@ void VMStructs::initOffsets() {
                     _anchor_fp_offset = *(int*)(entry + offset_offset);
                 }
             } else if (strcmp(type, "CodeBlob") == 0) {
-                if (strcmp(field, "_frame_size") == 0) {
+                if (strcmp(field, "_size") == 0) {
+                    _blob_size_offset = *(int*)(entry + offset_offset);
+                } else if (strcmp(field, "_frame_size") == 0) {
                     _frame_size_offset = *(int*)(entry + offset_offset);
                 } else if (strcmp(field, "_frame_complete_offset") == 0) {
                     _frame_complete_offset = *(int*)(entry + offset_offset);
@@ -485,12 +490,15 @@ void VMStructs::resolveOffsets() {
             && _klass != NULL
             && _lock_func != NULL && _unlock_func != NULL;
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
     _interpreter_frame_bcp_offset = VM::hotspot_version() >= 11 ? -8 : VM::hotspot_version() == 8 ? -7 : 0;
 #elif defined(__aarch64__)
     _interpreter_frame_bcp_offset = VM::hotspot_version() >= 11 ? -9 : VM::hotspot_version() == 8 ? -7 : 0;
     // The constant is missing on ARM, but fortunately, it has been stable for years across all JDK versions
     _entry_frame_call_wrapper_offset = -64;
+#elif defined(__arm__) || defined(__thumb__)
+    _interpreter_frame_bcp_offset = VM::hotspot_version() >= 11 ? -8 : 0;
+    _entry_frame_call_wrapper_offset = 0;
 #endif
 
     // JDK-8292758 has slightly changed ScopeDesc encoding
@@ -579,7 +587,7 @@ void VMStructs::patchSafeFetch() {
     } else if (WX_MEMORY && VM::hotspot_version() == 11) {
         void** entry = (void**)_libjvm->findSymbol("_ZN12StubRoutines17_safefetchN_entryE");
         if (entry != NULL) {
-            *entry = (void*)SafeAccess::loadPtr;
+            *entry = (void*)SafeAccess::load;
         }
     }
 }
@@ -623,6 +631,8 @@ void VMStructs::initThreadBridge() {
         if (vm_thread != NULL) {
             _has_native_thread_id = _thread_osthread_offset >= 0 && _osthread_id_offset >= 0;
             initTLS(vm_thread);
+            _env_offset = (intptr_t)env - (intptr_t)vm_thread;
+            memcpy(_java_thread_vtbl, vm_thread->vtable(), sizeof(_java_thread_vtbl));
         }
     }
 }
@@ -643,9 +653,16 @@ int VMThread::osThreadId() {
     const char* osthread = *(const char**) at(_thread_osthread_offset);
     if (osthread != NULL) {
         // Java thread may be in the middle of termination, and its osthread structure just released
-        return SafeAccess::load32((u32*)(osthread + _osthread_id_offset), (u32)-1);
+        return SafeAccess::load32((int32_t*)(osthread + _osthread_id_offset), -1);
     }
     return -1;
+}
+
+JNIEnv* VMThread::jni() {
+    if (_env_offset < 0) {
+        return VM::jni();  // fallback for non-HotSpot JVM
+    }
+    return isJavaThread() ? (JNIEnv*) at(_env_offset) : NULL;
 }
 
 jmethodID VMMethod::id() {
@@ -671,10 +688,8 @@ jmethodID VMMethod::id() {
 
 jmethodID VMMethod::validatedId() {
     jmethodID method_id = id();
-    if (goodPtr(method_id)) {
-        if (!_can_dereference_jmethod_id || *(VMMethod**)method_id == this) {
-            return method_id;
-        }
+    if (!_can_dereference_jmethod_id || (goodPtr(method_id) && *(VMMethod**)method_id == this)) {
+        return method_id;
     }
     return NULL;
 }
